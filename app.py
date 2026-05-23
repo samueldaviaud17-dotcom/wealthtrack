@@ -31,14 +31,27 @@ hr{{border-color:{C['border']}}}
 # ── Fetch ──────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def fetch(name):
-    url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&sheet={urllib.parse.quote(name, safe='')}"
-    try:
-        r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
-        r.raise_for_status()
-        return pd.read_csv(StringIO(r.text), header=None)
-    except Exception as e:
-        st.warning(f"⚠️ {name}: {e}")
-        return pd.DataFrame()
+    import urllib.parse
+    sheet_enc = urllib.parse.quote(name)
+    # Try multiple URL formats
+    urls = [
+        f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/pub?output=csv&sheet={sheet_enc}",
+        f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={sheet_enc}",
+        f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&sheet={sheet_enc}",
+    ]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    for url in urls:
+        try:
+            r = requests.get(url, timeout=15, headers=headers)
+            if r.status_code == 200:
+                return pd.read_csv(StringIO(r.text), header=None)
+        except Exception:
+            continue
+    st.warning(f"⚠️ Impossible de lire '{name}' — Vérifie que le Google Sheet est bien publié (Fichier → Publier sur le web)")
+    return pd.DataFrame()
 
 def v(df, r, c, d=0):
     try:
