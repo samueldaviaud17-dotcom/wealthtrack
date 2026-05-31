@@ -1197,10 +1197,10 @@ with tab6:
 
                 st.markdown("</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='font-size:9px;color:{C["muted"]};margin-bottom:8px;font-style:italic'>⚠️ Données Yahoo Finance · Vérifier avant utilisation · Colonnes = années les plus récentes en premier</div>", unsafe_allow_html=True)
-                st.selectbox("Ajouter dans :", ["📈 Actions en Portefeuille", "⚙️ Actions en Option", "👀 Actions à Surveiller"], key="valo_wl_target")
+                st.selectbox("Ajouter dans :", ["📈 Actions en Portefeuille", "⚙️ Actions en Portefeuille Option", "👀 Actions à Surveiller"], key="valo_wl_target")
                 add_wl = st.button("⭐ Ajouter à la Watchlist", use_container_width=True, key="valo_add")
             else:
-                st.selectbox("Ajouter dans :", ["📈 Actions en Portefeuille", "⚙️ Actions en Option", "👀 Actions à Surveiller"], key="valo_wl_target_2")
+                st.selectbox("Ajouter dans :", ["📈 Actions en Portefeuille", "⚙️ Actions en Portefeuille Option", "👀 Actions à Surveiller"], key="valo_wl_target_2")
                 add_wl = st.button("⭐ Ajouter à la Watchlist", use_container_width=True, key="valo_add_no_hist")
 
 
@@ -1756,7 +1756,7 @@ padding:12px 16px;margin-bottom:4px;display:flex;align-items:center;justify-cont
             target_label = st.session_state.get("valo_wl_target") or st.session_state.get("valo_wl_target_2") or "👀 Actions à Surveiller"
             if "Portefeuille" in target_label:
                 target_key, target_icon = "wl_portefeuille", "📈"
-            elif "Option" in target_label:
+            elif "Portefeuille Option" in target_label:
                 target_key, target_icon = "wl_options", "⚙️"
             else:
                 target_key, target_icon = "wl_surveillance", "👀"
@@ -1902,7 +1902,7 @@ with tab7:
         # ── 3 sous-tableaux distincts ─────────────────
         SUB_LISTS = [
             ("wl_portefeuille", "📈 Actions en Portefeuille", "#3FB950"),
-            ("wl_options",      "⚙️ Actions en Option",       "#F0883E"),
+            ("wl_options",      "⚙️ Actions en Portefeuille Option",       "#F0883E"),
             ("wl_surveillance", "👀 Actions à Surveiller",    "#60A5FA"),
         ]
 
@@ -1969,7 +1969,7 @@ with tab7:
         _all_entries = []
         _list_labels = {
             "wl_portefeuille": "📈 Portefeuille",
-            "wl_options":      "⚙️ Option",
+            "wl_options":      "⚙️ Portefeuille Option",
             "wl_surveillance": "👀 Surveiller",
         }
         for _k, _lbl in _list_labels.items():
@@ -1990,7 +1990,7 @@ with tab7:
 
             with _mgmt_cols[1]:
                 st.markdown("<div style='font-size:10px;color:{};margin-bottom:2px'>Déplacer vers</div>".format(C['muted']), unsafe_allow_html=True)
-                _dest_options = ["📈 Actions en Portefeuille", "⚙️ Actions en Option", "👀 Actions à Surveiller"]
+                _dest_options = ["📈 Actions en Portefeuille", "⚙️ Actions en Portefeuille Option", "👀 Actions à Surveiller"]
                 _dest_label = st.selectbox("", _dest_options,
                     label_visibility="collapsed", key="wl_mgmt_dest")
 
@@ -2006,7 +2006,7 @@ with tab7:
                             # Ajouter dans la destination
                             if "Portefeuille" in _dest_label:
                                 _dest_key = "wl_portefeuille"
-                            elif "Option" in _dest_label:
+                            elif "Portefeuille Option" in _dest_label:
                                 _dest_key = "wl_options"
                             else:
                                 _dest_key = "wl_surveillance"
