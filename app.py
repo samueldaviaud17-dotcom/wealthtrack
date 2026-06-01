@@ -1206,10 +1206,13 @@ with tab5:
     df_pat = fetch("🏠 Patrimoine")
 
     # ── KPIs Performance ───────────────────────────────
-    perf_t = n(v(df_pf,5,5))
-    cagr_t = n(v(df_pf,5,9)) if df_pf.shape[0]>5 else n(v(df_pat,5,9))
-    inv_t  = n(v(df_pf,9,2))
-    live_t = n(v(df_pf,9,3))
+    try:
+        perf_t = n(v(df_pf,5,5))
+        cagr_t = n(v(df_pf,5,9)) if df_pf.shape[0]>5 else n(v(df_pat,5,9))
+        inv_t  = n(v(df_pf,9,2))
+        live_t = n(v(df_pf,9,3))
+    except Exception:
+        perf_t = cagr_t = inv_t = live_t = 0.0
     pvmv_t = live_t - inv_t
     pp_t   = (live_t/inv_t-1)*100 if inv_t else 0
 
