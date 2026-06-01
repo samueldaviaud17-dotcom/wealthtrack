@@ -837,26 +837,54 @@ with tab4:
     fig9.add_trace(go.Bar(name='Prime (€)',x=mois_s,y=primes,
         marker_color=[C['purple'] if x>0 else C['border'] for x in primes],yaxis='y',
         hovertemplate='<b>%{x}</b><br>%{y:.2f} €<extra></extra>'))
-    # Prime cumulée
+
+    # Prime cumulée — ligne continue sur les mois actifs, None au-delà
     _primes_cum = []
     _cum = 0
-    for p in primes:
-        if p > 0: _cum += p
+    _last_active = -1
+    for i, p in enumerate(primes):
+        if p > 0:
+            _cum += p
+            _last_active = i
         _primes_cum.append(_cum if _cum > 0 else None)
-    # Labels sur les points de la courbe cumulée (seulement valeurs non-None)
-    _cum_labels = [f"{v:.0f} €" if v is not None else "" for v in _primes_cum]
-    fig9.add_trace(go.Scatter(name='Cumulé (€)',x=mois_s,y=_primes_cum,
+    # Pour la ligne : prolonge jusqu'au dernier mois actif, None après
+    _cum_line = [_primes_cum[i] if i <= _last_active else None for i in range(12)]
+    # Points et labels : uniquement sur les mois où une prime a été touchée (p > 0)
+    _cum_markers = [_primes_cum[i] if primes[i] > 0 else None for i in range(12)]
+    _cum_labels  = [f"{_primes_cum[i]:.0f} €" if primes[i] > 0 else "" for i in range(12)]
+
+    # Trace ligne (sans markers ni text)
+    fig9.add_trace(go.Scatter(name='Cumulé (€)',x=mois_s,y=_cum_line,
         line=dict(color=C['cyan'],width=2,dash='dot'),
-        mode='lines+markers+text',
-        marker=dict(size=5),
+        mode='lines', yaxis='y',
+        hovertemplate='<b>%{x}</b><br>Cumulé: %{y:.2f} €<extra></extra>',
+        showlegend=True))
+    # Trace markers + labels (uniquement mois actifs)
+    fig9.add_trace(go.Scatter(x=mois_s,y=_cum_markers,
+        mode='markers+text',
+        marker=dict(color=C['cyan'],size=6),
         text=_cum_labels,
         textposition='top center',
         textfont=dict(color=C['cyan'],size=10),
         yaxis='y',
-        hovertemplate='<b>%{x}</b><br>Cumulé: %{y:.2f} €<extra></extra>'))
-    fig9.add_trace(go.Scatter(name='ROI %',x=mois_s,y=rois,
-        line=dict(color=C['gold'],width=2),mode='lines+markers',marker=dict(size=6),yaxis='y2',
-        hovertemplate='<b>%{x}</b><br>%{y:.2f} %<extra></extra>'))
+        hovertemplate='<b>%{x}</b><br>Cumulé: %{y:.2f} €<extra></extra>',
+        showlegend=False))
+
+    # ROI % — points uniquement sur mois actifs (prime > 0)
+    _rois_active = [rois[i] if primes[i] > 0 else None for i in range(12)]
+    _roi_line    = [rois[i] if i <= _last_active and rois[i] != 0 else None for i in range(12)]
+    fig9.add_trace(go.Scatter(name='ROI %',x=mois_s,y=_roi_line,
+        line=dict(color=C['gold'],width=2),
+        mode='lines', yaxis='y2',
+        hovertemplate='<b>%{x}</b><br>%{y:.2f} %<extra></extra>',
+        showlegend=True))
+    fig9.add_trace(go.Scatter(x=mois_s,y=_rois_active,
+        mode='markers',
+        marker=dict(color=C['gold'],size=6),
+        yaxis='y2',
+        hovertemplate='<b>%{x}</b><br>%{y:.2f} %<extra></extra>',
+        showlegend=False))
+
     fig9.update_layout(**base_layout(320,True))
     fig9.update_layout(
         yaxis=dict(ticksuffix=' €',gridcolor=C['border'],linecolor=C['border'],tickfont=dict(color=C['muted'],size=11)),
