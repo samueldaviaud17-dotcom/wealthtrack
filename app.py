@@ -840,6 +840,7 @@ def parse_ibkr_csv(content_bytes):
     positions_ouvertes = []
     actif_net = None
     frais_total = 0.0
+    fx_rates = []  # taux EUR/USD collectés depuis les transactions Forex
 
     for line in lines:
         parts = [p.strip().strip('"') for p in line.split(',')]
@@ -916,8 +917,19 @@ def parse_ibkr_csv(content_bytes):
                 })
             except: pass
 
+        # Taux EUR/USD depuis transactions Forex
+        if section == "Transactions" and parts[1] == "Data" and parts[2] == "Order" and "Forex" in parts[3]:
+            try:
+                if "EUR.USD" in parts[5]:
+                    fx = float(parts[9]) if parts[9] else 0
+                    if fx > 0: fx_rates.append(fx)
+            except: pass
+
+    # Taux moyen EUR/USD du relevé (ou 1.16 par défaut)
+    fx_avg = sum(fx_rates) / len(fx_rates) if fx_rates else 1.16
+
     return {'year': year, 'trades': trades, 'positions': positions_ouvertes,
-            'actif_net': actif_net, 'frais': frais_total}
+            'actif_net': actif_net, 'frais': frais_total, 'fx': fx_avg}
 
 
 def get_trade_statut_final(sym, all_trades):
@@ -1052,23 +1064,28 @@ with tab4:
         opts_open    = [o for o in opts_filtered if o['statut'] == 'Ouverte']
         opts_closed  = [o for o in opts_filtered if o['statut'] != 'Ouverte']
 
+        # ── Taux EUR/USD moyen des fichiers chargés ──
+        _fx = sum(d.get('fx', 1.16) for d in st.session_state['ibkr_data'].values()) / max(len(st.session_state['ibkr_data']), 1)
+        def _eur(usd): return usd / _fx
+        def _fmt_usd_eur(usd): return f"${usd:+.2f} / {_eur(usd):+.0f}€" if usd != 0 else "$0.00 / 0€"
+        def _fmt_pos(usd): return f"${usd:.2f} / {_eur(usd):.0f}€"
+
         # ── KPIs trades ──
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        # P/L réalisé = somme des pl_net sur les trades clôturés uniquement (source IBKR officielle)
-        _total_primes  = sum(o['pl_net'] for o in opts_filtered if o['statut'] != 'Ouverte')
+        _total_pl      = sum(o['pl_net'] for o in opts_filtered if o['statut'] != 'Ouverte')
         _total_frais   = sum(o['frais'] for o in opts_filtered)
         _nb_total      = len([o for o in opts_filtered if o['statut'] != 'Ouverte'])
         _nb_exp        = len([o for o in opts_filtered if o['statut'] == 'Expirée'])
         _nb_ass        = len([o for o in opts_filtered if o['statut'] in ('Assignée','Fermée','Roulée')])
         _win_rate      = (_nb_exp / _nb_total * 100) if _nb_total > 0 else 0
-        _prime_moy     = _total_primes / max(_nb_total, 1)
+        _pl_moy        = _total_pl / max(_nb_total, 1)
 
         _k1,_k2,_k3,_k4,_k5 = st.columns(5)
         with _k1: st.markdown(card("TRADES CLÔTURÉS", str(_nb_total), f"{len(opts_open)} ouvert(s)", C['purple'],"⚙️"), unsafe_allow_html=True)
-        with _k2: st.markdown(card("WIN RATE", f"{_win_rate:.0f}%", f"{_nb_exp} expirées / {_nb_ass} assignées", C['green'] if _win_rate >= 70 else C['gold'],"✅"), unsafe_allow_html=True)
-        with _k3: st.markdown(card("P/L RÉALISÉ", f"${_total_primes:.2f}", f"moy. ${_prime_moy:.2f}/trade", C['gold'],"💰"), unsafe_allow_html=True)
-        with _k4: st.markdown(card("FRAIS TOTAUX",   f"-${_total_frais:.2f}", "", C['red'],"📋"), unsafe_allow_html=True)
-        with _k5: st.markdown(card("NET (P/L−frais)", f"${_total_primes - _total_frais:.2f}", "", pcol(_total_primes - _total_frais),"💹"), unsafe_allow_html=True)
+        with _k2: st.markdown(card("WIN RATE", f"{_win_rate:.0f}%", f"{_nb_exp} expirées / {_nb_ass} roulées/fermées", C['green'] if _win_rate >= 70 else C['gold'],"✅"), unsafe_allow_html=True)
+        with _k3: st.markdown(card("P/L RÉALISÉ", f"${_total_pl:.2f}", f"{_eur(_total_pl):.0f} €", pcol(_total_pl),"💰"), unsafe_allow_html=True)
+        with _k4: st.markdown(card("FRAIS TOTAUX", f"-${_total_frais:.2f}", f"-{_eur(_total_frais):.0f} €", C['red'],"📋"), unsafe_allow_html=True)
+        with _k5: st.markdown(card("NET (P/L−frais)", f"${_total_pl - _total_frais:.2f}", f"{_eur(_total_pl - _total_frais):.0f} €", pcol(_total_pl - _total_frais),"💹"), unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
         # ── Graphique primes par mois ──
@@ -1136,11 +1153,14 @@ with tab4:
             _THL = lambda t,w: f"<th style='padding:7px 10px;text-align:left;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']};width:{w}'>{t}</th>"
             tbl_o = f"<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:12px'>"
             tbl_o += "<thead><tr style='background:#0A1A0D'>"
-            tbl_o += _THL("Symbole","22%") + _THL("Ticker","8%") + _THL("C/P","5%") + _THL("Strike","7%") + _THL("Expiration","9%") + _THL("Ouverture","9%") + _TH("Prime nette","10%") + _TH("Frais","8%") + _TH("P/L non réal.","12%")
+            tbl_o += _THL("Symbole","18%") + _THL("Ticker","7%") + _THL("C/P","4%") + _THL("Strike","6%") + _THL("Expiration","8%") + _THL("Ouverture","8%") + _TH("Prime nette $","10%") + _TH("Prime nette €","9%") + _TH("Frais","7%") + _TH("P/L non réal. $","10%") + _TH("P/L non réal. €","9%")
             tbl_o += "</tr></thead><tbody>"
+            _tot_o_prime = _tot_o_frais = _tot_o_pl = 0.0
             for o in sorted(opts_open, key=lambda x: x['expiration']):
-                _cp_col = C['purple'] if o['call_put'] == 'C' else C['gold']
-                _pl_col = C['green'] if o['pl_net'] >= 0 else C['red']
+                _cp_col  = C['purple'] if o['call_put'] == 'C' else C['gold']
+                _pl_col  = C['green'] if o['pl_net'] >= 0 else C['red']
+                _pn_col  = C['green'] if o['prime_nette'] >= 0 else C['red']
+                _tot_o_prime += o['prime_nette']; _tot_o_frais += o['frais']; _tot_o_pl += o['pl_net']
                 tbl_o += f"<tr style='border-bottom:1px solid {C['border']}22'>"
                 tbl_o += f"<td style='padding:7px 10px;font-family:monospace;font-size:11px;color:{C['cyan']}'>{o['symbole']}</td>"
                 tbl_o += f"<td style='padding:7px 10px;font-weight:600;color:{C['text']}'>{o['ticker']}</td>"
@@ -1148,10 +1168,23 @@ with tab4:
                 tbl_o += f"<td style='padding:7px 10px;color:{C['text']}'>${o['strike']}</td>"
                 tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{o['expiration']}</td>"
                 tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{o['date']}</td>"
-                tbl_o += f"<td style='padding:7px 10px;text-align:right;color:{C['green']};font-weight:600'>${o['prime_nette']:+.2f}</td>"
+                tbl_o += f"<td style='padding:7px 10px;text-align:right;color:{_pn_col};font-weight:600'>${o['prime_nette']:+.2f}</td>"
+                tbl_o += f"<td style='padding:7px 10px;text-align:right;color:{_pn_col}'>{_eur(o['prime_nette']):+.0f}€</td>"
                 tbl_o += f"<td style='padding:7px 10px;text-align:right;color:{C['red']}'>-${o['frais']:.2f}</td>"
                 tbl_o += f"<td style='padding:7px 10px;text-align:right;color:{_pl_col};font-weight:600'>${o['pl_net']:+.2f}</td>"
+                tbl_o += f"<td style='padding:7px 10px;text-align:right;color:{_pl_col}'>{_eur(o['pl_net']):+.0f}€</td>"
                 tbl_o += "</tr>"
+            # Ligne total
+            _tp_col = C['green'] if _tot_o_prime >= 0 else C['red']
+            _tpl_col = C['green'] if _tot_o_pl >= 0 else C['red']
+            tbl_o += f"<tr style='background:{C['card']};border-top:2px solid {C['border']};font-weight:700'>"
+            tbl_o += f"<td colspan='6' style='padding:8px 10px;color:{C['muted']};font-size:11px;text-transform:uppercase;letter-spacing:.05em'>Total</td>"
+            tbl_o += f"<td style='padding:8px 10px;text-align:right;color:{_tp_col}'>${_tot_o_prime:+.2f}</td>"
+            tbl_o += f"<td style='padding:8px 10px;text-align:right;color:{_tp_col}'>{_eur(_tot_o_prime):+.0f}€</td>"
+            tbl_o += f"<td style='padding:8px 10px;text-align:right;color:{C['red']}'>-${_tot_o_frais:.2f}</td>"
+            tbl_o += f"<td style='padding:8px 10px;text-align:right;color:{_tpl_col}'>${_tot_o_pl:+.2f}</td>"
+            tbl_o += f"<td style='padding:8px 10px;text-align:right;color:{_tpl_col}'>{_eur(_tot_o_pl):+.0f}€</td>"
+            tbl_o += "</tr>"
             tbl_o += "</tbody></table></div>"
             st.markdown(tbl_o, unsafe_allow_html=True)
             st.markdown("<br>", unsafe_allow_html=True)
@@ -1174,7 +1207,6 @@ with tab4:
             _sf = st.session_state[_stat_key]
             opts_display = opts_closed if _sf == 'Tous' else [o for o in opts_closed if o['statut'] == _sf]
 
-            # Couleurs statut
             def _scol(s):
                 return {
                     'Expirée': ('#3FB950','#0D2A0D'),
@@ -1185,12 +1217,19 @@ with tab4:
 
             tbl_h = f"<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:12px'>"
             tbl_h += "<thead><tr style='background:#111827'>"
-            tbl_h += _THL("Symbole","20%") + _THL("Ticker","7%") + _THL("C/P","5%") + _THL("Strike","7%") + _THL("Expiration","9%") + _THL("Ouverture","9%") + _TH("Prime nette","9%") + _TH("Frais","7%") + _TH("P/L net","9%") + _TH("Statut","8%")
+            tbl_h += (_THL("Symbole","16%") + _THL("Ticker","6%") + _THL("C/P","4%") + _THL("Strike","6%") +
+                      _THL("Expiration","8%") + _THL("Ouverture","8%") +
+                      _TH("Prime nette $","9%") + _TH("Prime nette €","7%") +
+                      _TH("Frais","6%") +
+                      _TH("P/L net $","8%") + _TH("P/L net €","7%") + _TH("Statut","7%"))
             tbl_h += "</tr></thead><tbody>"
+            _tot_prime = _tot_frais = _tot_pl = 0.0
             for o in sorted(opts_display, key=lambda x: x['date'], reverse=True):
-                _cp_col = C['purple'] if o['call_put'] == 'C' else C['gold']
-                _pl_col = C['green'] if o['pl_net'] >= 0 else C['red']
+                _cp_col  = C['purple'] if o['call_put'] == 'C' else C['gold']
+                _pl_col  = C['green'] if o['pl_net'] >= 0 else C['red']
+                _pn_col  = C['green'] if o['prime_nette'] >= 0 else C['red']
                 _sc, _sbg = _scol(o['statut'])
+                _tot_prime += o['prime_nette']; _tot_frais += o['frais']; _tot_pl += o['pl_net']
                 tbl_h += f"<tr style='border-bottom:1px solid {C['border']}22'>"
                 tbl_h += f"<td style='padding:7px 10px;font-family:monospace;font-size:11px;color:{C['cyan']}'>{o['symbole']}</td>"
                 tbl_h += f"<td style='padding:7px 10px;font-weight:600;color:{C['text']}'>{o['ticker']}</td>"
@@ -1198,11 +1237,24 @@ with tab4:
                 tbl_h += f"<td style='padding:7px 10px;color:{C['text']}'>${o['strike']}</td>"
                 tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{o['expiration']}</td>"
                 tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{o['date']}</td>"
-                tbl_h += f"<td style='padding:7px 10px;text-align:right;color:{C['green']};font-weight:600'>${o['prime_nette']:+.2f}</td>"
+                tbl_h += f"<td style='padding:7px 10px;text-align:right;color:{_pn_col};font-weight:600'>${o['prime_nette']:+.2f}</td>"
+                tbl_h += f"<td style='padding:7px 10px;text-align:right;color:{_pn_col}'>{_eur(o['prime_nette']):+.0f}€</td>"
                 tbl_h += f"<td style='padding:7px 10px;text-align:right;color:{C['red']}'>-${o['frais']:.2f}</td>"
                 tbl_h += f"<td style='padding:7px 10px;text-align:right;color:{_pl_col};font-weight:600'>${o['pl_net']:+.2f}</td>"
+                tbl_h += f"<td style='padding:7px 10px;text-align:right;color:{_pl_col}'>{_eur(o['pl_net']):+.0f}€</td>"
                 tbl_h += f"<td style='padding:7px 10px;text-align:center'><span style='background:{_sbg};color:{_sc};border-radius:12px;padding:2px 8px;font-size:10px;font-weight:600'>{o['statut']}</span></td>"
                 tbl_h += "</tr>"
+            # Ligne total
+            _tp_col  = C['green'] if _tot_prime >= 0 else C['red']
+            _tpl_col = C['green'] if _tot_pl    >= 0 else C['red']
+            tbl_h += f"<tr style='background:{C['card']};border-top:2px solid {C['border']};font-weight:700'>"
+            tbl_h += f"<td colspan='6' style='padding:8px 10px;color:{C['muted']};font-size:11px;text-transform:uppercase;letter-spacing:.05em'>Total ({len(opts_display)} trades)</td>"
+            tbl_h += f"<td style='padding:8px 10px;text-align:right;color:{_tp_col}'>${_tot_prime:+.2f}</td>"
+            tbl_h += f"<td style='padding:8px 10px;text-align:right;color:{_tp_col}'>{_eur(_tot_prime):+.0f}€</td>"
+            tbl_h += f"<td style='padding:8px 10px;text-align:right;color:{C['red']}'>-${_tot_frais:.2f}</td>"
+            tbl_h += f"<td style='padding:8px 10px;text-align:right;color:{_tpl_col}'>${_tot_pl:+.2f}</td>"
+            tbl_h += f"<td style='padding:8px 10px;text-align:right;color:{_tpl_col}'>{_eur(_tot_pl):+.0f}€</td>"
+            tbl_h += "<td></td></tr>"
             tbl_h += "</tbody></table></div>"
             st.markdown(tbl_h, unsafe_allow_html=True)
 
