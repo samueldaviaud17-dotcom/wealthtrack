@@ -823,8 +823,8 @@ with tab4:
     roi_pct = oroi*100 if abs(oroi)<5 else oroi
     c1,c2,c3,c4,c5=st.columns(5)
     with c1: st.markdown(card("CAPITAL RÉEL",fmt(n(v(df_opt,5,0))),"",C['teal'],"🏦"),unsafe_allow_html=True)
-    with c2: st.markdown(card("CAPITAL ACTUEL",fmt(n(v(df_opt,5,3))),"",C['purple'],"📈"),unsafe_allow_html=True)
-    with c3: st.markdown(card("CAPITAL INVESTI",fmt(n(v(df_opt,5,6))),"",C['blue'],"💰"),unsafe_allow_html=True)
+    with c2: st.markdown(card("CAPITAL INVESTI",fmt(n(v(df_opt,5,6))),"",C['blue'],"💰"),unsafe_allow_html=True)
+    with c3: st.markdown(card("CAPITAL ACTUEL",fmt(n(v(df_opt,5,3))),"",C['purple'],"📈"),unsafe_allow_html=True)
     with c4: st.markdown(card("ROI TOTAL",f"{roi_pct:+.2f} %","",pcol(roi_pct),"🏆"),unsafe_allow_html=True)
     with c5: st.markdown(card("PRIMES YTD",f"{ope:.2f} €",f"{opd:.2f} $",C['gold'],"💰"),unsafe_allow_html=True)
     st.markdown("<br>",unsafe_allow_html=True)
@@ -843,8 +843,16 @@ with tab4:
     for p in primes:
         if p > 0: _cum += p
         _primes_cum.append(_cum if _cum > 0 else None)
+    # Labels sur les points de la courbe cumulée (seulement valeurs non-None)
+    _cum_labels = [f"{v:.0f} €" if v is not None else "" for v in _primes_cum]
     fig9.add_trace(go.Scatter(name='Cumulé (€)',x=mois_s,y=_primes_cum,
-        line=dict(color=C['cyan'],width=2,dash='dot'),mode='lines+markers',marker=dict(size=5),yaxis='y',
+        line=dict(color=C['cyan'],width=2,dash='dot'),
+        mode='lines+markers+text',
+        marker=dict(size=5),
+        text=_cum_labels,
+        textposition='top center',
+        textfont=dict(color=C['cyan'],size=10),
+        yaxis='y',
         hovertemplate='<b>%{x}</b><br>Cumulé: %{y:.2f} €<extra></extra>'))
     fig9.add_trace(go.Scatter(name='ROI %',x=mois_s,y=rois,
         line=dict(color=C['gold'],width=2),mode='lines+markers',marker=dict(size=6),yaxis='y2',
