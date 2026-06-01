@@ -1201,9 +1201,13 @@ with tab4:
 
 # ══════════════════════════════════════════════════════
 with tab5:
-    df_pf  = fetch("🏆 Perf. Totale")
-    df_ea  = fetch("📈 Évol. Annuelle")
-    df_pat = fetch("🏠 Patrimoine")
+    try:
+        df_pf  = fetch("🏆 Perf. Totale")
+        df_ea  = fetch("📈 Évol. Annuelle")
+        df_pat = fetch("🏠 Patrimoine")
+    except Exception:
+        import pandas as pd
+        df_pf = df_ea = df_pat = pd.DataFrame()
 
     # ── KPIs Performance ───────────────────────────────
     try:
@@ -1221,7 +1225,7 @@ with tab5:
         ("TOTAL INVESTI",    fmt(inv_t),          "",                   C['blue'],  "💰"),
         ("VALEUR ACTUELLE",  fmt(live_t),          "",                   C['cyan'],  "📈"),
         ("PV / MV TOTAL",    fmt(pvmv_t),          pct(pp_t),            pcol(pp_t), "💹"),
-        ("CAGR ANNUALISÉ",   pct(n(v(df_pat,5,9))),"depuis fév. 2022",  C['purple'],"⚡"),
+        ("CAGR ANNUALISÉ",   pct(n(v(df_pat,5,9)) if df_pat.shape[0]>5 else 0),"depuis fév. 2022",  C['purple'],"⚡"),
     ]):
         with col: st.markdown(card(ti,va,su,co,ic),unsafe_allow_html=True)
 
@@ -1230,11 +1234,14 @@ with tab5:
 
     with Lp:
         sec("Performance par enveloppe","🏆","#6EE7B7","#0A1C0F")
-        poches=[
-            ("📈 Bourse (CTO+PEA)", n(v(df_pf,6,2)), n(v(df_pf,6,3)), C['blue']),
-            ("₿ Crypto (Binance)",  n(v(df_pf,7,2)), n(v(df_pf,7,3)), C['gold']),
-            ("⚙️ Options (IBK)",    n(v(df_pf,8,2)), n(v(df_pf,8,3)), C['purple']),
-        ]
+        try:
+            poches=[
+                ("📈 Bourse (CTO+PEA)", n(v(df_pf,6,2)), n(v(df_pf,6,3)), C['blue']),
+                ("₿ Crypto (Binance)",  n(v(df_pf,7,2)), n(v(df_pf,7,3)), C['gold']),
+                ("⚙️ Options (IBK)",    n(v(df_pf,8,2)), n(v(df_pf,8,3)), C['purple']),
+            ]
+        except Exception:
+            poches=[]
         for po,pi,pl,pc in poches:
             ppv=pl-pi; pp=(pl/pi-1)*100 if pi else 0
             a,b,cc,d=st.columns([2.5,1.5,1.5,1.2])
