@@ -1220,12 +1220,16 @@ with tab5:
     pvmv_t = live_t - inv_t
     pp_t   = (live_t/inv_t-1)*100 if inv_t else 0
 
+    try:
+        _cagr_val = n(v(df_pat,5,9)) if df_pat is not None and df_pat.shape[0]>5 and df_pat.shape[1]>9 else 0.0
+    except Exception:
+        _cagr_val = 0.0
     c1,c2,c3,c4 = st.columns(4)
     for col,(ti,va,su,co,ic) in zip([c1,c2,c3,c4],[
         ("TOTAL INVESTI",    fmt(inv_t),          "",                   C['blue'],  "💰"),
         ("VALEUR ACTUELLE",  fmt(live_t),          "",                   C['cyan'],  "📈"),
         ("PV / MV TOTAL",    fmt(pvmv_t),          pct(pp_t),            pcol(pp_t), "💹"),
-        ("CAGR ANNUALISÉ",   pct(n(v(df_pat,5,9)) if df_pat.shape[0]>5 else 0),"depuis fév. 2022",  C['purple'],"⚡"),
+        ("CAGR ANNUALISÉ",   pct(_cagr_val),       "depuis fév. 2022",  C['purple'],"⚡"),
     ]):
         with col: st.markdown(card(ti,va,su,co,ic),unsafe_allow_html=True)
 
