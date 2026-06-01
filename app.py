@@ -821,27 +821,17 @@ with tab4:
     ope=n(v(df_opt,5,12)); opd=n(v(df_opt,5,15))
 
     roi_pct = oroi*100 if abs(oroi)<5 else oroi
-    c1,c2,c3,c4=st.columns(4)
-    with c1: st.markdown(card("CAPITAL ACTUEL",fmt(n(v(df_opt,5,3))),"",C['purple'],"📈"),unsafe_allow_html=True)
-    with c2: st.markdown(card("CAPITAL INVESTI",fmt(n(v(df_opt,5,6))),"",C['blue'],"💰"),unsafe_allow_html=True)
-    with c3: st.markdown(card("ROI TOTAL",f"{roi_pct:+.2f} %","",pcol(roi_pct),"🏆"),unsafe_allow_html=True)
-    with c4: st.markdown(card("PRIMES YTD",f"{ope:.2f} €",f"{opd:.2f} $",C['gold'],"💰"),unsafe_allow_html=True)
+    c1,c2,c3,c4,c5=st.columns(5)
+    with c1: st.markdown(card("CAPITAL RÉEL",fmt(n(v(df_opt,5,0))),"",C['teal'],"🏦"),unsafe_allow_html=True)
+    with c2: st.markdown(card("CAPITAL ACTUEL",fmt(n(v(df_opt,5,3))),"",C['purple'],"📈"),unsafe_allow_html=True)
+    with c3: st.markdown(card("CAPITAL INVESTI",fmt(n(v(df_opt,5,6))),"",C['blue'],"💰"),unsafe_allow_html=True)
+    with c4: st.markdown(card("ROI TOTAL",f"{roi_pct:+.2f} %","",pcol(roi_pct),"🏆"),unsafe_allow_html=True)
+    with c5: st.markdown(card("PRIMES YTD",f"{ope:.2f} €",f"{opd:.2f} $",C['gold'],"💰"),unsafe_allow_html=True)
     st.markdown("<br>",unsafe_allow_html=True)
 
     sec(f"Options {_YR} — Stratégie de la Roue — Primes mensuelles","⚙️","#FDA4AF","#1C0A12")
     primes=[n(v(df_opt,12+i,9)) for i in range(12)]
     rois=[n(v(df_opt,12+i,15)) for i in range(12)]
-    # KPI taux de succès (options expirées sans assignation)
-    _nb_trades   = sum(1 for p in primes if p > 0)
-    _nb_assigned = sum(1 for i in range(12) if n(v(df_opt,12+i,18)) > 0)  # col 18 = assignation
-    _taux_succes = ((_nb_trades - _nb_assigned) / _nb_trades * 100) if _nb_trades > 0 else 0
-    _prime_moy   = sum(p for p in primes if p>0) / max(_nb_trades,1)
-
-    _ok1, _ok2, _ok3 = st.columns(3)
-    with _ok1: st.markdown(card("NB TRADES",str(_nb_trades),"cette année",C['purple'],"⚙️"),unsafe_allow_html=True)
-    with _ok2: st.markdown(card("TAUX SUCCÈS",f"{_taux_succes:.0f}%","sans assignation",C['green'] if _taux_succes>=70 else C['gold'],"✅"),unsafe_allow_html=True)
-    with _ok3: st.markdown(card("PRIME MOY.",f"{_prime_moy:.2f} €","par trade",C['gold'],"💰"),unsafe_allow_html=True)
-    st.markdown("<br>",unsafe_allow_html=True)
 
     fig9=go.Figure()
     fig9.add_trace(go.Bar(name='Prime (€)',x=mois_s,y=primes,
