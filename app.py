@@ -121,6 +121,12 @@ def n(val):
     try: return float(s)
     except: return 0.0
 
+def sv(df, row, col):
+    """Lecture sécurisée d'une cellule DataFrame — retourne 0.0 si indisponible."""
+    try: return n(v(df, row, col))
+    except Exception: return 0.0
+
+
 def fmt(x): return f"{int(round(x)):,}".replace(",", " ") + " €"
 def pct(x): return f"{'+' if x>=0 else ''}{x:.2f} %"
 def pcol(x): return C['green'] if x >= 0 else C['red']
@@ -207,10 +213,10 @@ with tab1:
     df_b  = fetch("📊 Bourse")
     df_opt= fetch("⚙️ Options")
 
-    pat=n(v(df_p,5,1)); inv=n(v(df_p,5,3)); perf=n(v(df_p,5,5)); cagr=n(v(df_p,5,9))
-    ytd=n(v(df_em,5,9)); ytdp=n(v(df_em,5,12))
-    divs_ytd = n(v(df_b,5,15))
-    primes_ytd = n(v(df_opt,5,12))
+    pat=sv(df_p,5,1); inv=sv(df_p,5,3); perf=sv(df_p,5,5); cagr=sv(df_p,5,9)
+    ytd=sv(df_em,5,9); ytdp=sv(df_em,5,12)
+    divs_ytd = sv(df_b,5,15)
+    primes_ytd = sv(df_opt,5,12)
 
     # ── 7 KPI cards ────────────────────────────────────
     cols = st.columns(7)
@@ -1201,29 +1207,21 @@ with tab4:
 
 # ══════════════════════════════════════════════════════
 with tab5:
+    import pandas as pd
     try:
         df_pf  = fetch("🏆 Perf. Totale")
         df_ea  = fetch("📈 Évol. Annuelle")
         df_pat = fetch("🏠 Patrimoine")
     except Exception:
-        import pandas as pd
         df_pf = df_ea = df_pat = pd.DataFrame()
 
     # ── KPIs Performance ───────────────────────────────
-    try:
-        perf_t = n(v(df_pf,5,5))
-        cagr_t = n(v(df_pf,5,9)) if df_pf.shape[0]>5 else n(v(df_pat,5,9))
-        inv_t  = n(v(df_pf,9,2))
-        live_t = n(v(df_pf,9,3))
-    except Exception:
-        perf_t = cagr_t = inv_t = live_t = 0.0
+    inv_t  = sv(df_pf,9,2)
+    live_t = sv(df_pf,9,3)
     pvmv_t = live_t - inv_t
     pp_t   = (live_t/inv_t-1)*100 if inv_t else 0
+    _cagr_val = sv(df_pat,5,9)
 
-    try:
-        _cagr_val = n(v(df_pat,5,9)) if df_pat is not None and df_pat.shape[0]>5 and df_pat.shape[1]>9 else 0.0
-    except Exception:
-        _cagr_val = 0.0
     c1,c2,c3,c4 = st.columns(4)
     for col,(ti,va,su,co,ic) in zip([c1,c2,c3,c4],[
         ("TOTAL INVESTI",    fmt(inv_t),          "",                   C['blue'],  "💰"),
@@ -1238,14 +1236,11 @@ with tab5:
 
     with Lp:
         sec("Performance par enveloppe","🏆","#6EE7B7","#0A1C0F")
-        try:
-            poches=[
-                ("📈 Bourse (CTO+PEA)", n(v(df_pf,6,2)), n(v(df_pf,6,3)), C['blue']),
-                ("₿ Crypto (Binance)",  n(v(df_pf,7,2)), n(v(df_pf,7,3)), C['gold']),
-                ("⚙️ Options (IBK)",    n(v(df_pf,8,2)), n(v(df_pf,8,3)), C['purple']),
-            ]
-        except Exception:
-            poches=[]
+        poches=[
+            ("📈 Bourse (CTO+PEA)", sv(df_pf,6,2), sv(df_pf,6,3), C['blue']),
+            ("₿ Crypto (Binance)",  sv(df_pf,7,2), sv(df_pf,7,3), C['gold']),
+            ("⚙️ Options (IBK)",    sv(df_pf,8,2), sv(df_pf,8,3), C['purple']),
+        ]
         for po,pi,pl,pc in poches:
             ppv=pl-pi; pp=(pl/pi-1)*100 if pi else 0
             a,b,cc,d=st.columns([2.5,1.5,1.5,1.2])
@@ -1270,7 +1265,7 @@ padding:12px 16px;display:flex;justify-content:space-between;align-items:center"
 
         # Évolution annuelle
         sec("Évolution annuelle du patrimoine","📈","#6EE7B7","#0A1C0F")
-        tots=[n(v(df_ea,11+i,9)) for i in range(5)]
+        tots=[sv(df_ea,11+i,9) for i in range(5)]
         yrs=[str(_YR-4),str(_YR-3),str(_YR-2),str(_YR-1),str(_YR)]
         tv=[x for x in tots if x>0]; yl=yrs[:len(tv)]
         if tv:
@@ -1291,10 +1286,10 @@ padding:12px 16px;display:flex;justify-content:space-between;align-items:center"
     with Rp:
         sec("CAGR vs Benchmarks","⚡","#6EE7B7","#0A1C0F")
         benchs=[
-            ("🏆 Mon PF",    n(v(df_pf,13,2)), C['gold'], True),
-            ("📈 SP500",     n(v(df_pf,14,2)), C['cyan'], False),
-            ("🇫🇷 CAC 40",  n(v(df_pf,15,2)), C['cyan'], False),
-            ("🌍 STOXX 600", n(v(df_pf,16,2)), C['cyan'], False),
+            ("🏆 Mon PF",    sv(df_pf,13,2), C['gold'], True),
+            ("📈 SP500",     sv(df_pf,14,2), C['cyan'], False),
+            ("🇫🇷 CAC 40",  sv(df_pf,15,2), C['cyan'], False),
+            ("🌍 STOXX 600", sv(df_pf,16,2), C['cyan'], False),
         ]
         if all(b[1]==0 for b in benchs):
             benchs=[("🏆 Mon PF",3.64,C['gold'],True),("📈 SP500",13.37,C['cyan'],False),
