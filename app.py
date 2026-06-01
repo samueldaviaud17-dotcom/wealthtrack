@@ -813,84 +813,385 @@ padding:5px 8px;border-radius:6px;margin-bottom:3px;background:{C['card']};opaci
 <span style="font-family:'Space Grotesk';font-size:16px;font-weight:700;color:{C['green']}">+{total_st:.2f} $</span></div>""",unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════
-# TAB 4 — OPTIONS & PERF
+# TAB 4 — OPTIONS
 # ══════════════════════════════════════════════════════
+
+def parse_ibkr_csv(content_bytes):
+    """Parse un CSV IBKR et retourne les données structurées."""
+    import io
+    lines = content_bytes.decode('utf-8-sig').splitlines()
+
+    # Détecter l'année depuis la ligne Period
+    year = None
+    for line in lines[:10]:
+        if 'Period' in line:
+            import re
+            m = re.search(r'(\d{4})', line)
+            if m: year = int(m.group(1))
+            break
+
+    trades = []
+    positions_ouvertes = []
+    actif_net = None
+    frais_total = 0.0
+
+    for line in lines:
+        parts = [p.strip().strip('"') for p in line.split(',')]
+        if len(parts) < 3: continue
+
+        section = parts[0]
+
+        # Actif net
+        if section == "Actif net" and len(parts) >= 4 and parts[1] == "Data":
+            try:
+                val = float(parts[3].replace(',','').replace('$','').replace('€',''))
+                if parts[2] == "Total en EUR" and val > 0:
+                    actif_net = val
+            except: pass
+
+        # Frais
+        if section == "Frais" and parts[1] == "Data" and parts[2] == "Total en EUR":
+            try: frais_total = abs(float(parts[5].replace(',','')))
+            except: pass
+
+        # Positions ouvertes — options uniquement
+        if section == "Positions ouvertes" and parts[1] == "Data" and "Options" in parts[3]:
+            try:
+                sym = parts[5]
+                qty = float(parts[6])
+                cours = float(parts[10])
+                valeur = float(parts[11])
+                pl_unreal = float(parts[12])
+                positions_ouvertes.append({
+                    'symbole': sym, 'quantite': qty,
+                    'cours': cours, 'valeur': valeur,
+                    'pl_unreal': pl_unreal, 'annee': year
+                })
+            except: pass
+
+        # Transactions options
+        if section == "Transactions" and parts[1] == "Data" and parts[2] == "Order" and "Options" in parts[3]:
+            try:
+                sym      = parts[5]
+                date_str = parts[6].split(',')[0].strip()
+                qty      = float(parts[7])
+                prix     = float(parts[8]) if parts[8] else 0
+                produit  = float(parts[10]) if parts[10] else 0
+                frais    = float(parts[11]) if parts[11] else 0
+                pl_real  = float(parts[13]) if parts[13] else 0
+                code     = parts[15] if len(parts) > 15 else ''
+
+                # Déterminer statut
+                if 'Ep' in code:   statut = 'Expirée'
+                elif 'C' in code and qty > 0:  statut = 'Fermée'
+                elif 'O' in code and qty < 0:  statut = 'Ouverte'
+                else: statut = 'Clôturée'
+
+                # Parser le symbole : ex "MARA 18JUN26 14 C"
+                sym_parts = sym.split()
+                ticker_opt = sym_parts[0] if sym_parts else sym
+                cp = sym_parts[-1] if sym_parts else ''
+                strike_str = sym_parts[-2] if len(sym_parts) >= 3 else ''
+                exp_str = sym_parts[1] if len(sym_parts) >= 2 else ''
+
+                trades.append({
+                    'symbole': sym, 'ticker': ticker_opt,
+                    'call_put': cp, 'strike': strike_str, 'expiration': exp_str,
+                    'date': date_str, 'quantite': qty,
+                    'prix': prix, 'produit': produit, 'frais': frais,
+                    'pl_realise': pl_real, 'statut': statut,
+                    'code': code, 'annee': year
+                })
+            except: pass
+
+    return {'year': year, 'trades': trades, 'positions': positions_ouvertes,
+            'actif_net': actif_net, 'frais': frais_total}
+
+
+def get_trade_statut_final(sym, all_trades):
+    """Détermine le statut final d'une option à partir de tous ses trades."""
+    sym_trades = [t for t in all_trades if t['symbole'] == sym]
+    codes = ' '.join(t.get('code','') for t in sym_trades)
+    if 'Ep' in codes: return 'Expirée'
+    # Si la quantité nette est 0 → clôturée/roulée
+    net_qty = sum(t['quantite'] for t in sym_trades)
+    if abs(net_qty) < 0.01:
+        # Si P/L négatif sur une clôture → roulée
+        close_trades = [t for t in sym_trades if t['quantite'] > 0 and 'Ep' not in t.get('code','')]
+        if close_trades: return 'Roulée'
+        return 'Fermée'
+    return 'Ouverte'
+
+
+# ── Init session state IBKR ──
+if 'ibkr_data' not in st.session_state:
+    st.session_state['ibkr_data'] = {}  # {year: parsed_data}
+
 with tab4:
-    df_opt=fetch("⚙️ Options")
-    oc=n(v(df_opt,5,0)); oroi=n(v(df_opt,5,9))
-    ope=n(v(df_opt,5,12)); opd=n(v(df_opt,5,15))
+    df_opt = fetch("⚙️ Options")
+    oc   = n(v(df_opt,5,0));  oroi = n(v(df_opt,5,9))
+    ope  = n(v(df_opt,5,12)); opd  = n(v(df_opt,5,15))
+    roi_pct = oroi*100 if abs(oroi) < 5 else oroi
 
-    roi_pct = oroi*100 if abs(oroi)<5 else oroi
-    c1,c2,c3,c4,c5=st.columns(5)
-    with c1: st.markdown(card("CAPITAL RÉEL",fmt(n(v(df_opt,5,0))),"",C['teal'],"🏦"),unsafe_allow_html=True)
-    with c2: st.markdown(card("CAPITAL INVESTI",fmt(n(v(df_opt,5,6))),"",C['blue'],"💰"),unsafe_allow_html=True)
-    with c3: st.markdown(card("CAPITAL ACTUEL",fmt(n(v(df_opt,5,3))),"",C['purple'],"📈"),unsafe_allow_html=True)
-    with c4: st.markdown(card("ROI TOTAL",f"{roi_pct:+.2f} %","",pcol(roi_pct),"🏆"),unsafe_allow_html=True)
-    with c5: st.markdown(card("PRIMES YTD",f"{ope:.2f} €",f"{opd:.2f} $",C['gold'],"💰"),unsafe_allow_html=True)
-    st.markdown("<br>",unsafe_allow_html=True)
+    # ── KPIs Google Sheet (capital) ──
+    c1,c2,c3,c4,c5 = st.columns(5)
+    with c1: st.markdown(card("CAPITAL RÉEL",    fmt(n(v(df_opt,5,0))), "", C['teal'],  "🏦"), unsafe_allow_html=True)
+    with c2: st.markdown(card("CAPITAL INVESTI", fmt(n(v(df_opt,5,6))), "", C['blue'],  "💰"), unsafe_allow_html=True)
+    with c3: st.markdown(card("CAPITAL ACTUEL",  fmt(n(v(df_opt,5,3))), "", C['purple'],"📈"), unsafe_allow_html=True)
+    with c4: st.markdown(card("ROI TOTAL",       f"{roi_pct:+.2f} %",   "", pcol(roi_pct),"🏆"), unsafe_allow_html=True)
+    with c5: st.markdown(card("PRIMES YTD",      f"{ope:.2f} €", f"{opd:.2f} $", C['gold'],"💰"), unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    sec(f"Options {_YR} — Stratégie de la Roue — Primes mensuelles","⚙️","#FDA4AF","#1C0A12")
-    primes=[n(v(df_opt,12+i,9)) for i in range(12)]
-    rois=[n(v(df_opt,12+i,15)) for i in range(12)]
+    # ══════════════════════════════════════════════════
+    # SECTION IBKR
+    # ══════════════════════════════════════════════════
+    sec("Stratégie de la Roue — Trades IBKR", "⚙️", "#FDA4AF", "#1C0A12")
 
-    fig9=go.Figure()
-    fig9.add_trace(go.Bar(name='Prime (€)',x=mois_s,y=primes,
-        marker_color=[C['purple'] if x>0 else C['border'] for x in primes],yaxis='y',
-        hovertemplate='<b>%{x}</b><br>%{y:.2f} €<extra></extra>'))
+    # ── Zone import ──
+    _col_import, _col_badges = st.columns([2, 3])
+    with _col_import:
+        uploaded_csvs = st.file_uploader(
+            "Importer relevé(s) IBKR (.csv)",
+            type=['csv'], accept_multiple_files=True,
+            label_visibility="collapsed",
+            key="ibkr_uploader"
+        )
+        if uploaded_csvs:
+            for f in uploaded_csvs:
+                parsed = parse_ibkr_csv(f.read())
+                if parsed['year']:
+                    st.session_state['ibkr_data'][parsed['year']] = parsed
 
-    # Prime cumulée — ligne continue sur les mois actifs, None au-delà
-    _primes_cum = []
-    _cum = 0
-    _last_active = -1
-    for i, p in enumerate(primes):
-        if p > 0:
-            _cum += p
-            _last_active = i
-        _primes_cum.append(_cum if _cum > 0 else None)
-    # Pour la ligne : prolonge jusqu'au dernier mois actif, None après
-    _cum_line = [_primes_cum[i] if i <= _last_active else None for i in range(12)]
-    # Points et labels : uniquement sur les mois où une prime a été touchée (p > 0)
-    _cum_markers = [_primes_cum[i] if primes[i] > 0 else None for i in range(12)]
-    _cum_labels  = [f"{_primes_cum[i]:.0f} €" if primes[i] > 0 else "" for i in range(12)]
+    with _col_badges:
+        loaded_years = sorted(st.session_state['ibkr_data'].keys())
+        if loaded_years:
+            st.markdown(
+                "<div style='display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding-top:6px'>"
+                "<span style='font-size:11px;color:" + C['muted'] + "'>Fichiers chargés :</span>" +
+                "".join([f"<span style='background:{C['green']}22;color:{C['green']};border:1px solid {C['green']}44;border-radius:12px;padding:2px 10px;font-size:11px;font-weight:600'>{y} ✓</span>" for y in loaded_years]) +
+                "</div>", unsafe_allow_html=True
+            )
 
-    # Trace ligne (sans markers ni text)
-    fig9.add_trace(go.Scatter(name='Cumulé (€)',x=mois_s,y=_cum_line,
-        line=dict(color=C['cyan'],width=2,dash='dot'),
-        mode='lines', yaxis='y',
-        hovertemplate='<b>%{x}</b><br>Cumulé: %{y:.2f} €<extra></extra>',
-        showlegend=True))
-    # Trace markers + labels (uniquement mois actifs)
-    fig9.add_trace(go.Scatter(x=mois_s,y=_cum_markers,
-        mode='markers+text',
-        marker=dict(color=C['cyan'],size=6),
-        text=_cum_labels,
-        textposition='top center',
-        textfont=dict(color=C['cyan'],size=10),
-        yaxis='y',
-        hovertemplate='<b>%{x}</b><br>Cumulé: %{y:.2f} €<extra></extra>',
-        showlegend=False))
+    if not st.session_state['ibkr_data']:
+        st.markdown(
+            f"<div style='text-align:center;padding:40px;color:{C['muted']};font-size:13px'>"
+            "📂 Importez vos relevés IBKR pour afficher vos trades<br>"
+            "<span style='font-size:11px'>Téléchargez vos CSV depuis Interactive Brokers → Rapports → Relevé de compte</span>"
+            "</div>", unsafe_allow_html=True
+        )
+    else:
+        # ── Fusion de tous les trades ──
+        all_trades_raw = []
+        for yr_data in st.session_state['ibkr_data'].values():
+            all_trades_raw.extend(yr_data['trades'])
+        all_positions = []
+        for yr_data in st.session_state['ibkr_data'].values():
+            all_positions.extend(yr_data['positions'])
 
-    # ROI % — points uniquement sur mois actifs (prime > 0)
-    _rois_active = [rois[i] if primes[i] > 0 else None for i in range(12)]
-    _roi_line    = [rois[i] if i <= _last_active and rois[i] != 0 else None for i in range(12)]
-    fig9.add_trace(go.Scatter(name='ROI %',x=mois_s,y=_roi_line,
-        line=dict(color=C['gold'],width=2),
-        mode='lines', yaxis='y2',
-        hovertemplate='<b>%{x}</b><br>%{y:.2f} %<extra></extra>',
-        showlegend=True))
-    fig9.add_trace(go.Scatter(x=mois_s,y=_rois_active,
-        mode='markers',
-        marker=dict(color=C['gold'],size=6),
-        yaxis='y2',
-        hovertemplate='<b>%{x}</b><br>%{y:.2f} %<extra></extra>',
-        showlegend=False))
+        # Grouper par symbole pour statut final
+        syms_seen = {}
+        trades_by_sym = {}
+        for t in all_trades_raw:
+            sym = t['symbole']
+            if sym not in trades_by_sym: trades_by_sym[sym] = []
+            trades_by_sym[sym].append(t)
 
-    fig9.update_layout(**base_layout(320,True))
-    fig9.update_layout(
-        yaxis=dict(ticksuffix=' €',gridcolor=C['border'],linecolor=C['border'],tickfont=dict(color=C['muted'],size=11)),
-        yaxis2=dict(overlaying='y',side='right',tickfont=dict(color=C['gold'],size=10),tickformat='.2f',ticksuffix=' %',gridcolor='rgba(0,0,0,0)',rangemode='nonnegative'),
-        legend=dict(orientation='h',y=-0.12,font=dict(size=11)))
-    st.plotly_chart(fig9,use_container_width=True,config={'displayModeBar':True,'scrollZoom':True,'modeBarButtonsToRemove':['lasso2d','select2d','hoverClosestCartesian','hoverCompareCartesian','toggleSpikelines'],'displaylogo':False})
+        # Construire liste consolidée (1 ligne par symbole/option)
+        options_consolidated = []
+        for sym, sym_trades in trades_by_sym.items():
+            statut_final = get_trade_statut_final(sym, sym_trades)
+            open_trade  = next((t for t in sym_trades if t['quantite'] < 0), sym_trades[0])
+            pl_net      = sum(t['pl_realise'] for t in sym_trades)
+            prime_nette = sum(t['produit'] for t in sym_trades)
+            frais_tot   = sum(abs(t['frais']) for t in sym_trades)
+            options_consolidated.append({
+                'symbole': sym, 'ticker': open_trade['ticker'],
+                'call_put': open_trade['call_put'], 'strike': open_trade['strike'],
+                'expiration': open_trade['expiration'], 'date': open_trade['date'],
+                'prime_nette': prime_nette, 'frais': frais_tot,
+                'pl_net': pl_net, 'statut': statut_final, 'annee': open_trade['annee']
+            })
+
+        # ── Filtre années ──
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        avail_years = sorted(set(o['annee'] for o in options_consolidated if o['annee']))
+        year_opts   = [str(y) for y in avail_years] + ["ALL"]
+        _fy_cols    = st.columns(len(year_opts) + 4)
+        selected_yr = st.session_state.get('opt_yr_filter', 'ALL')
+
+        for i, yo in enumerate(year_opts):
+            with _fy_cols[i]:
+                _active = selected_yr == yo
+                _bg     = C['purple'] if _active else C['card']
+                _col_t  = "#FFFFFF" if _active else C['muted']
+                if st.button(yo, key=f"opt_yr_{yo}",
+                             use_container_width=True):
+                    st.session_state['opt_yr_filter'] = yo
+                    st.rerun()
+
+        selected_yr = st.session_state.get('opt_yr_filter', 'ALL')
+
+        # Filtrer
+        if selected_yr == 'ALL':
+            opts_filtered = options_consolidated
+        else:
+            opts_filtered = [o for o in options_consolidated if str(o['annee']) == selected_yr]
+
+        opts_open    = [o for o in opts_filtered if o['statut'] == 'Ouverte']
+        opts_closed  = [o for o in opts_filtered if o['statut'] != 'Ouverte']
+
+        # ── KPIs trades ──
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        _total_primes  = sum(o['prime_nette'] for o in opts_filtered if o['prime_nette'] > 0)
+        _total_frais   = sum(o['frais'] for o in opts_filtered)
+        _nb_total      = len([o for o in opts_filtered if o['statut'] != 'Ouverte'])
+        _nb_exp        = len([o for o in opts_filtered if o['statut'] == 'Expirée'])
+        _nb_ass        = len([o for o in opts_filtered if o['statut'] in ('Assignée','Fermée')])
+        _win_rate      = (_nb_exp / _nb_total * 100) if _nb_total > 0 else 0
+        _prime_moy     = _total_primes / max(_nb_total, 1)
+
+        _k1,_k2,_k3,_k4,_k5 = st.columns(5)
+        with _k1: st.markdown(card("TRADES CLÔTURÉS", str(_nb_total), f"{len(opts_open)} ouvert(s)", C['purple'],"⚙️"), unsafe_allow_html=True)
+        with _k2: st.markdown(card("WIN RATE", f"{_win_rate:.0f}%", f"{_nb_exp} expirées / {_nb_ass} assignées", C['green'] if _win_rate >= 70 else C['gold'],"✅"), unsafe_allow_html=True)
+        with _k3: st.markdown(card("PRIMES PERÇUES", f"${_total_primes:.2f}", f"moy. ${_prime_moy:.2f}/trade", C['gold'],"💰"), unsafe_allow_html=True)
+        with _k4: st.markdown(card("FRAIS TOTAUX",   f"-${_total_frais:.2f}", "", C['red'],"📋"), unsafe_allow_html=True)
+        with _k5: st.markdown(card("NET (primes−frais)", f"${_total_primes - _total_frais:.2f}", "", pcol(_total_primes - _total_frais),"💹"), unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Graphique primes par mois ──
+        import calendar
+        _mois_labels = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc']
+
+        if selected_yr == 'ALL':
+            years_to_plot = avail_years
+        else:
+            years_to_plot = [int(selected_yr)]
+
+        fig_opt = go.Figure()
+        _colors_yr = {avail_years[0]: C['blue'], avail_years[-1]: C['purple']}
+        if len(avail_years) > 2:
+            _colors_yr[avail_years[1]] = C['cyan']
+
+        for _yr in years_to_plot:
+            _yr_trades = [o for o in options_consolidated if o['annee'] == _yr and o['statut'] != 'Ouverte']
+            _monthly   = [0.0] * 12
+            for o in _yr_trades:
+                try:
+                    _m = int(o['date'].split('-')[1]) - 1
+                    if 0 <= _m < 12: _monthly[_m] += o['prime_nette']
+                except: pass
+            _col_yr = _colors_yr.get(_yr, C['purple'])
+            _last_m = max((i for i,v in enumerate(_monthly) if v > 0), default=-1)
+            _cum    = 0
+            _cum_pts = []
+            for i,v in enumerate(_monthly):
+                if v > 0: _cum += v
+                _cum_pts.append(_cum if i <= _last_m and _cum > 0 else None)
+
+            fig_opt.add_trace(go.Bar(
+                name=f'Primes {_yr}', x=_mois_labels, y=_monthly,
+                marker_color=_col_yr + "BB",
+                hovertemplate=f'<b>%{{x}} {_yr}</b><br>%{{y:.2f}} $<extra></extra>'))
+            _cum_active = [_cum_pts[i] if _monthly[i] > 0 else None for i in range(12)]
+            _cum_labels_yr = [f"${_cum_pts[i]:.0f}" if _monthly[i] > 0 else "" for i in range(12)]
+            fig_opt.add_trace(go.Scatter(
+                name=f'Cumulé {_yr}', x=_mois_labels, y=_cum_pts,
+                line=dict(color=_col_yr, width=2, dash='dot'),
+                mode='lines', showlegend=True,
+                hovertemplate=f'<b>%{{x}} {_yr}</b><br>Cumulé: %{{y:.2f}} $<extra></extra>'))
+            fig_opt.add_trace(go.Scatter(
+                x=_mois_labels, y=_cum_active,
+                mode='markers+text', marker=dict(color=_col_yr, size=6),
+                text=_cum_labels_yr, textposition='top center',
+                textfont=dict(color=_col_yr, size=10),
+                showlegend=False,
+                hovertemplate=f'<b>%{{x}} {_yr}</b><br>Cumulé: %{{y:.2f}} $<extra></extra>'))
+
+        fig_opt.update_layout(**base_layout(280, True))
+        fig_opt.update_layout(
+            barmode='group',
+            yaxis=dict(tickprefix='$', gridcolor=C['border'], tickfont=dict(color=C['muted'],size=11)),
+            legend=dict(orientation='h', y=-0.15, font=dict(size=11)))
+        st.plotly_chart(fig_opt, use_container_width=True, config={
+            'displayModeBar':True,'scrollZoom':True,
+            'modeBarButtonsToRemove':['lasso2d','select2d'],'displaylogo':False})
+
+        # ── Tableau positions ouvertes ──
+        if opts_open:
+            sec(f"Positions ouvertes ({len(opts_open)})", "🟢", C['green'], "#0A1A0D")
+            _TH  = lambda t,w: f"<th style='padding:7px 10px;text-align:right;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']};width:{w}'>{t}</th>"
+            _THL = lambda t,w: f"<th style='padding:7px 10px;text-align:left;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']};width:{w}'>{t}</th>"
+            tbl_o = f"<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:12px'>"
+            tbl_o += "<thead><tr style='background:#0A1A0D'>"
+            tbl_o += _THL("Symbole","22%") + _THL("Ticker","8%") + _THL("C/P","5%") + _THL("Strike","7%") + _THL("Expiration","9%") + _THL("Ouverture","9%") + _TH("Prime nette","10%") + _TH("Frais","8%") + _TH("P/L non réal.","12%")
+            tbl_o += "</tr></thead><tbody>"
+            for o in sorted(opts_open, key=lambda x: x['expiration']):
+                _cp_col = C['purple'] if o['call_put'] == 'C' else C['gold']
+                _pl_col = C['green'] if o['pl_net'] >= 0 else C['red']
+                tbl_o += f"<tr style='border-bottom:1px solid {C['border']}22'>"
+                tbl_o += f"<td style='padding:7px 10px;font-family:monospace;font-size:11px;color:{C['cyan']}'>{o['symbole']}</td>"
+                tbl_o += f"<td style='padding:7px 10px;font-weight:600;color:{C['text']}'>{o['ticker']}</td>"
+                tbl_o += f"<td style='padding:7px 10px;font-weight:700;color:{_cp_col}'>{o['call_put']}</td>"
+                tbl_o += f"<td style='padding:7px 10px;color:{C['text']}'>${o['strike']}</td>"
+                tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{o['expiration']}</td>"
+                tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{o['date']}</td>"
+                tbl_o += f"<td style='padding:7px 10px;text-align:right;color:{C['green']};font-weight:600'>${o['prime_nette']:+.2f}</td>"
+                tbl_o += f"<td style='padding:7px 10px;text-align:right;color:{C['red']}'>-${o['frais']:.2f}</td>"
+                tbl_o += f"<td style='padding:7px 10px;text-align:right;color:{_pl_col};font-weight:600'>${o['pl_net']:+.2f}</td>"
+                tbl_o += "</tr>"
+            tbl_o += "</tbody></table></div>"
+            st.markdown(tbl_o, unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Tableau historique ──
+        if opts_closed:
+            _stat_labels = ['Tous','Expirée','Roulée','Fermée']
+            _stat_key    = 'opt_stat_filter'
+            if _stat_key not in st.session_state: st.session_state[_stat_key] = 'Tous'
+
+            _sh1,_sh2,_sh3,_sh4,_sh5 = st.columns([2,1,1,1,4])
+            _stat_cols = [_sh2,_sh3,_sh4]
+            sec(f"Historique trades ({len(opts_closed)})", "📋", C['muted'], "#0A0E1A")
+            for i,(sc2,sl) in enumerate(zip(_stat_cols,_stat_labels[1:])):
+                with sc2:
+                    if st.button(sl, key=f"stat_f_{sl}", use_container_width=True):
+                        st.session_state[_stat_key] = sl
+                        st.rerun()
+
+            _sf = st.session_state[_stat_key]
+            opts_display = opts_closed if _sf == 'Tous' else [o for o in opts_closed if o['statut'] == _sf]
+
+            # Couleurs statut
+            def _scol(s):
+                return {
+                    'Expirée': ('#3FB950','#0D2A0D'),
+                    'Roulée':  (C['gold'],'#2A1800'),
+                    'Fermée':  (C['cyan'],'#0D1A2A'),
+                    'Assignée':(C['red'],'#2A0D0D'),
+                }.get(s,(C['muted'],C['card']))
+
+            tbl_h = f"<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:12px'>"
+            tbl_h += "<thead><tr style='background:#111827'>"
+            tbl_h += _THL("Symbole","20%") + _THL("Ticker","7%") + _THL("C/P","5%") + _THL("Strike","7%") + _THL("Expiration","9%") + _THL("Ouverture","9%") + _TH("Prime nette","9%") + _TH("Frais","7%") + _TH("P/L net","9%") + _TH("Statut","8%")
+            tbl_h += "</tr></thead><tbody>"
+            for o in sorted(opts_display, key=lambda x: x['date'], reverse=True):
+                _cp_col = C['purple'] if o['call_put'] == 'C' else C['gold']
+                _pl_col = C['green'] if o['pl_net'] >= 0 else C['red']
+                _sc, _sbg = _scol(o['statut'])
+                tbl_h += f"<tr style='border-bottom:1px solid {C['border']}22'>"
+                tbl_h += f"<td style='padding:7px 10px;font-family:monospace;font-size:11px;color:{C['cyan']}'>{o['symbole']}</td>"
+                tbl_h += f"<td style='padding:7px 10px;font-weight:600;color:{C['text']}'>{o['ticker']}</td>"
+                tbl_h += f"<td style='padding:7px 10px;font-weight:700;color:{_cp_col}'>{o['call_put']}</td>"
+                tbl_h += f"<td style='padding:7px 10px;color:{C['text']}'>${o['strike']}</td>"
+                tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{o['expiration']}</td>"
+                tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{o['date']}</td>"
+                tbl_h += f"<td style='padding:7px 10px;text-align:right;color:{C['green']};font-weight:600'>${o['prime_nette']:+.2f}</td>"
+                tbl_h += f"<td style='padding:7px 10px;text-align:right;color:{C['red']}'>-${o['frais']:.2f}</td>"
+                tbl_h += f"<td style='padding:7px 10px;text-align:right;color:{_pl_col};font-weight:600'>${o['pl_net']:+.2f}</td>"
+                tbl_h += f"<td style='padding:7px 10px;text-align:center'><span style='background:{_sbg};color:{_sc};border-radius:12px;padding:2px 8px;font-size:10px;font-weight:600'>{o['statut']}</span></td>"
+                tbl_h += "</tr>"
+            tbl_h += "</tbody></table></div>"
+            st.markdown(tbl_h, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════
 with tab5:
