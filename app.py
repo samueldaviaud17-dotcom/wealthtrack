@@ -1095,7 +1095,8 @@ with tab4:
 
             fig_opt.add_trace(go.Bar(
                 name=f'Primes {_yr}', x=_mois_labels, y=_monthly,
-                marker_color=_col_yr + "BB",
+                marker_color=_col_yr,
+                opacity=0.75,
                 hovertemplate=f'<b>%{{x}} {_yr}</b><br>%{{y:.2f}} $<extra></extra>'))
             _cum_active = [_cum_pts[i] if _monthly[i] > 0 else None for i in range(12)]
             _cum_labels_yr = [f"${_cum_pts[i]:.0f}" if _monthly[i] > 0 else "" for i in range(12)]
