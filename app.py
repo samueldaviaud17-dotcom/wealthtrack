@@ -870,29 +870,35 @@ def parse_ibkr_csv(content_bytes):
             except: pass
 
         # Transactions options
+        # Format IBKR : date et heure sont dans 2 colonnes séparées [6] et [7]
+        # donc les colonnes suivantes sont décalées de +1 par rapport à un CSV standard
         if section == "Transactions" and parts[1] == "Data" and parts[2] == "Order" and "Options" in parts[3]:
             try:
                 sym      = parts[5]
-                date_str = parts[6].split(',')[0].strip()
-                qty      = float(parts[7])
-                prix     = float(parts[8]) if parts[8] else 0
-                produit  = float(parts[10]) if parts[10] else 0
-                frais    = float(parts[11]) if parts[11] else 0
-                pl_real  = float(parts[13]) if parts[13] else 0
-                code     = parts[15] if len(parts) > 15 else ''
+                date_str = parts[6]                              # date seule
+                # heure en parts[7] — on ignore
+                qty      = float(parts[8])  if parts[8]  else 0
+                prix     = float(parts[9])  if parts[9]  else 0
+                # parts[10] = cours clôture
+                produit  = float(parts[11]) if parts[11] else 0
+                frais    = float(parts[12]) if parts[12] else 0
+                # parts[13] = base
+                pl_real  = float(parts[14]) if parts[14] else 0
+                # parts[15] = pl_mtm
+                code     = parts[16] if len(parts) > 16 else ''
 
                 # Déterminer statut
-                if 'Ep' in code:   statut = 'Expirée'
-                elif 'C' in code and qty > 0:  statut = 'Fermée'
-                elif 'O' in code and qty < 0:  statut = 'Ouverte'
-                else: statut = 'Clôturée'
+                if 'Ep' in code:              statut = 'Expirée'
+                elif qty > 0 and 'C' in code: statut = 'Fermée'
+                elif qty < 0:                 statut = 'Ouverte'
+                else:                         statut = 'Clôturée'
 
                 # Parser le symbole : ex "MARA 18JUN26 14 C"
                 sym_parts = sym.split()
                 ticker_opt = sym_parts[0] if sym_parts else sym
-                cp = sym_parts[-1] if sym_parts else ''
+                cp         = sym_parts[-1] if sym_parts else ''
                 strike_str = sym_parts[-2] if len(sym_parts) >= 3 else ''
-                exp_str = sym_parts[1] if len(sym_parts) >= 2 else ''
+                exp_str    = sym_parts[1]  if len(sym_parts) >= 2 else ''
 
                 trades.append({
                     'symbole': sym, 'ticker': ticker_opt,
@@ -1068,9 +1074,8 @@ with tab4:
             years_to_plot = [int(selected_yr)]
 
         fig_opt = go.Figure()
-        _colors_yr = {avail_years[0]: C['blue'], avail_years[-1]: C['purple']}
-        if len(avail_years) > 2:
-            _colors_yr[avail_years[1]] = C['cyan']
+        _colors_list = [C['blue'], C['purple'], C['cyan'], C['green']]
+        _colors_yr = {yr: _colors_list[i % len(_colors_list)] for i, yr in enumerate(avail_years)}
 
         for _yr in years_to_plot:
             _yr_trades = [o for o in options_consolidated if o['annee'] == _yr and o['statut'] != 'Ouverte']
