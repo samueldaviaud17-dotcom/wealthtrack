@@ -1054,20 +1054,21 @@ with tab4:
 
         # ── KPIs trades ──
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        _total_primes  = sum(o['prime_nette'] for o in opts_filtered if o['prime_nette'] > 0)
+        # P/L réalisé = somme des pl_net sur les trades clôturés uniquement (source IBKR officielle)
+        _total_primes  = sum(o['pl_net'] for o in opts_filtered if o['statut'] != 'Ouverte')
         _total_frais   = sum(o['frais'] for o in opts_filtered)
         _nb_total      = len([o for o in opts_filtered if o['statut'] != 'Ouverte'])
         _nb_exp        = len([o for o in opts_filtered if o['statut'] == 'Expirée'])
-        _nb_ass        = len([o for o in opts_filtered if o['statut'] in ('Assignée','Fermée')])
+        _nb_ass        = len([o for o in opts_filtered if o['statut'] in ('Assignée','Fermée','Roulée')])
         _win_rate      = (_nb_exp / _nb_total * 100) if _nb_total > 0 else 0
         _prime_moy     = _total_primes / max(_nb_total, 1)
 
         _k1,_k2,_k3,_k4,_k5 = st.columns(5)
         with _k1: st.markdown(card("TRADES CLÔTURÉS", str(_nb_total), f"{len(opts_open)} ouvert(s)", C['purple'],"⚙️"), unsafe_allow_html=True)
         with _k2: st.markdown(card("WIN RATE", f"{_win_rate:.0f}%", f"{_nb_exp} expirées / {_nb_ass} assignées", C['green'] if _win_rate >= 70 else C['gold'],"✅"), unsafe_allow_html=True)
-        with _k3: st.markdown(card("PRIMES PERÇUES", f"${_total_primes:.2f}", f"moy. ${_prime_moy:.2f}/trade", C['gold'],"💰"), unsafe_allow_html=True)
+        with _k3: st.markdown(card("P/L RÉALISÉ", f"${_total_primes:.2f}", f"moy. ${_prime_moy:.2f}/trade", C['gold'],"💰"), unsafe_allow_html=True)
         with _k4: st.markdown(card("FRAIS TOTAUX",   f"-${_total_frais:.2f}", "", C['red'],"📋"), unsafe_allow_html=True)
-        with _k5: st.markdown(card("NET (primes−frais)", f"${_total_primes - _total_frais:.2f}", "", pcol(_total_primes - _total_frais),"💹"), unsafe_allow_html=True)
+        with _k5: st.markdown(card("NET (P/L−frais)", f"${_total_primes - _total_frais:.2f}", "", pcol(_total_primes - _total_frais),"💹"), unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
         # ── Graphique primes par mois ──
