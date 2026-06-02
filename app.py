@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import os
+from pathlib import Path
 try:
     import yfinance as yf
     YF_AVAILABLE = True
@@ -947,9 +949,30 @@ def get_trade_statut_final(sym, all_trades):
     return 'Ouverte'
 
 
-# ── Init session state IBKR ──
+# ── Dossier de stockage persistant des CSV IBKR ──
+IBKR_DIR = Path(__file__).parent / "ibkr_data"
+IBKR_DIR.mkdir(exist_ok=True)
+
+@st.cache_data(show_spinner=False)
+def parse_ibkr_cached(file_bytes):
+    """Parse et cache le résultat — clé = contenu binaire du fichier."""
+    return parse_ibkr_csv(file_bytes)
+
+def load_all_ibkr():
+    """Charge et parse tous les CSV présents sur le disque."""
+    data = {}
+    for csv_file in sorted(IBKR_DIR.glob("*.csv")):
+        try:
+            parsed = parse_ibkr_cached(csv_file.read_bytes())
+            if parsed['year']:
+                data[parsed['year']] = parsed
+        except Exception:
+            pass
+    return data
+
+# ── Chargement initial depuis disque (persistant entre sessions) ──
 if 'ibkr_data' not in st.session_state:
-    st.session_state['ibkr_data'] = {}  # {year: parsed_data}
+    st.session_state['ibkr_data'] = load_all_ibkr()
 
 with tab4:
     df_opt = fetch("⚙️ Options")
@@ -982,19 +1005,35 @@ with tab4:
         )
         if uploaded_csvs:
             for f in uploaded_csvs:
-                parsed = parse_ibkr_csv(f.read())
+                file_bytes = f.read()
+                parsed = parse_ibkr_cached(file_bytes)
                 if parsed['year']:
+                    # Sauvegarder sur disque avec nom normalisé
+                    dest = IBKR_DIR / f"ibkr_{parsed['year']}.csv"
+                    dest.write_bytes(file_bytes)
                     st.session_state['ibkr_data'][parsed['year']] = parsed
 
     with _col_badges:
         loaded_years = sorted(st.session_state['ibkr_data'].keys())
-        if loaded_years:
-            st.markdown(
-                "<div style='display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding-top:6px'>"
-                "<span style='font-size:11px;color:" + C['muted'] + "'>Fichiers chargés :</span>" +
-                "".join([f"<span style='background:{C['green']}22;color:{C['green']};border:1px solid {C['green']}44;border-radius:12px;padding:2px 10px;font-size:11px;font-weight:600'>{y} ✓</span>" for y in loaded_years]) +
-                "</div>", unsafe_allow_html=True
-            )
+        _col_b, _col_del = st.columns([3, 1])
+        with _col_b:
+            if loaded_years:
+                st.markdown(
+                    "<div style='display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding-top:6px'>"
+                    "<span style='font-size:11px;color:" + C['muted'] + "'>Fichiers stockés :</span>" +
+                    "".join([f"<span style='background:{C["green"]}22;color:{C["green"]};border:1px solid {C["green"]}44;border-radius:12px;padding:2px 10px;font-size:11px;font-weight:600'>{y} ✓</span>" for y in loaded_years]) +
+                    "</div>", unsafe_allow_html=True
+                )
+        with _col_del:
+            if loaded_years:
+                _yr_to_del = st.selectbox("Supprimer :", ["—"] + [str(y) for y in loaded_years],
+                                          label_visibility="collapsed", key="ibkr_del_sel")
+                if _yr_to_del != "—":
+                    _del_file = IBKR_DIR / f"ibkr_{_yr_to_del}.csv"
+                    if _del_file.exists(): _del_file.unlink()
+                    if int(_yr_to_del) in st.session_state['ibkr_data']:
+                        del st.session_state['ibkr_data'][int(_yr_to_del)]
+                    st.rerun()
 
     if not st.session_state['ibkr_data']:
         st.markdown(
@@ -1036,36 +1075,61 @@ with tab4:
                 'pl_net': pl_net, 'statut': statut_final, 'annee': open_trade['annee']
             })
 
-        # ── Filtre années ──
+        # ── Filtre années multi-sélection ──
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
         avail_years = sorted(set(o['annee'] for o in options_consolidated if o['annee']))
-        year_opts   = [str(y) for y in avail_years] + ["ALL"]
-        _fy_cols    = st.columns(len(year_opts) + 4)
-        selected_yr = st.session_state.get('opt_yr_filter', 'ALL')
 
-        for i, yo in enumerate(year_opts):
+        # Init : toutes les années sélectionnées par défaut
+        if 'opt_yr_selected' not in st.session_state or            not all(y in st.session_state['opt_yr_selected'] for y in avail_years if y not in st.session_state.get('opt_yr_selected',{})):
+            # Ajouter les nouvelles années automatiquement
+            if 'opt_yr_selected' not in st.session_state:
+                st.session_state['opt_yr_selected'] = {y: True for y in avail_years}
+            else:
+                for y in avail_years:
+                    if y not in st.session_state['opt_yr_selected']:
+                        st.session_state['opt_yr_selected'][y] = True
+
+        # Boutons toggle + bouton ALL
+        _nb_btns = len(avail_years) + 2  # années + ALL + espace
+        _fy_cols = st.columns([1]*len(avail_years) + [1, 4])
+
+        for i, yr in enumerate(avail_years):
             with _fy_cols[i]:
-                _active = selected_yr == yo
-                _bg     = C['purple'] if _active else C['card']
-                _col_t  = "#FFFFFF" if _active else C['muted']
-                if st.button(yo, key=f"opt_yr_{yo}",
-                             use_container_width=True):
-                    st.session_state['opt_yr_filter'] = yo
+                _active = st.session_state['opt_yr_selected'].get(yr, True)
+                _label  = f"✓ {yr}" if _active else str(yr)
+                if st.button(_label, key=f"opt_yr_tog_{yr}", use_container_width=True):
+                    st.session_state['opt_yr_selected'][yr] = not _active
                     st.rerun()
 
-        selected_yr = st.session_state.get('opt_yr_filter', 'ALL')
+        # Bouton ALL → sélectionne tout si pas tout sélectionné, sinon désélectionne tout sauf le premier
+        with _fy_cols[len(avail_years)]:
+            _all_on = all(st.session_state['opt_yr_selected'].get(y, True) for y in avail_years)
+            if st.button("ALL ✓" if _all_on else "ALL", key="opt_yr_all", use_container_width=True):
+                if _all_on:
+                    # Tout désélectionner sauf le premier
+                    for y in avail_years:
+                        st.session_state['opt_yr_selected'][y] = (y == avail_years[0])
+                else:
+                    for y in avail_years:
+                        st.session_state['opt_yr_selected'][y] = True
+                st.rerun()
+
+        # Années actives (au moins 1 toujours sélectionnée)
+        active_years = [y for y in avail_years if st.session_state['opt_yr_selected'].get(y, True)]
+        if not active_years:
+            active_years = avail_years  # fallback
+
+        # Taux FX basé uniquement sur les années sélectionnées
+        _fx_data = [st.session_state['ibkr_data'][y] for y in active_years if y in st.session_state['ibkr_data']]
 
         # Filtrer
-        if selected_yr == 'ALL':
-            opts_filtered = options_consolidated
-        else:
-            opts_filtered = [o for o in options_consolidated if str(o['annee']) == selected_yr]
+        opts_filtered = [o for o in options_consolidated if o['annee'] in active_years]
 
         opts_open    = [o for o in opts_filtered if o['statut'] == 'Ouverte']
         opts_closed  = [o for o in opts_filtered if o['statut'] != 'Ouverte']
 
         # ── Taux EUR/USD moyen des fichiers chargés ──
-        _fx = sum(d.get('fx', 1.16) for d in st.session_state['ibkr_data'].values()) / max(len(st.session_state['ibkr_data']), 1)
+        _fx = sum(d.get('fx', 1.16) for d in _fx_data) / max(len(_fx_data), 1) if _fx_data else 1.16
         def _eur(usd): return usd / _fx
         def _cell(usd, col, bold=False):
             """Cellule avec $X.XX en haut et équivalent €X.XX en dessous."""
@@ -1099,63 +1163,30 @@ with tab4:
         with _k5: st.markdown(card("NET (P/L−frais)", f"${_total_pl - _total_frais:.2f}", f"{_eur(_total_pl - _total_frais):.2f} €", pcol(_total_pl - _total_frais),"💹"), unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # ── Graphique primes par mois ──
-        import calendar
-        _mois_labels = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc']
-
-        if selected_yr == 'ALL':
-            years_to_plot = avail_years
-        else:
-            years_to_plot = [int(selected_yr)]
-
-        fig_opt = go.Figure()
-        _colors_list = [C['blue'], C['purple'], C['cyan'], C['green']]
-        _colors_yr = {yr: _colors_list[i % len(_colors_list)] for i, yr in enumerate(avail_years)}
-
-        for _yr in years_to_plot:
-            _yr_trades = [o for o in options_consolidated if o['annee'] == _yr and o['statut'] != 'Ouverte']
-            _monthly   = [0.0] * 12
-            for o in _yr_trades:
-                try:
-                    _m = int(o['date'].split('-')[1]) - 1
-                    if 0 <= _m < 12: _monthly[_m] += o['prime_nette']
-                except: pass
-            _col_yr = _colors_yr.get(_yr, C['purple'])
-            _last_m = max((i for i,v in enumerate(_monthly) if v > 0), default=-1)
-            _cum    = 0
-            _cum_pts = []
-            for i,v in enumerate(_monthly):
-                if v > 0: _cum += v
-                _cum_pts.append(_cum if i <= _last_m and _cum > 0 else None)
-
-            fig_opt.add_trace(go.Bar(
-                name=f'Primes {_yr}', x=_mois_labels, y=_monthly,
-                marker_color=_col_yr,
-                opacity=0.75,
-                hovertemplate=f'<b>%{{x}} {_yr}</b><br>%{{y:.2f}} $<extra></extra>'))
-            _cum_active = [_cum_pts[i] if _monthly[i] > 0 else None for i in range(12)]
-            _cum_labels_yr = [f"${_cum_pts[i]:.0f}" if _monthly[i] > 0 else "" for i in range(12)]
-            fig_opt.add_trace(go.Scatter(
-                name=f'Cumulé {_yr}', x=_mois_labels, y=_cum_pts,
-                line=dict(color=_col_yr, width=2, dash='dot'),
-                mode='lines', showlegend=True,
-                hovertemplate=f'<b>%{{x}} {_yr}</b><br>Cumulé: %{{y:.2f}} $<extra></extra>'))
-            fig_opt.add_trace(go.Scatter(
-                x=_mois_labels, y=_cum_active,
-                mode='markers+text', marker=dict(color=_col_yr, size=6),
-                text=_cum_labels_yr, textposition='top center',
-                textfont=dict(color=_col_yr, size=10),
-                showlegend=False,
-                hovertemplate=f'<b>%{{x}} {_yr}</b><br>Cumulé: %{{y:.2f}} $<extra></extra>'))
-
-        fig_opt.update_layout(**base_layout(280, True))
-        fig_opt.update_layout(
-            barmode='group',
-            yaxis=dict(tickprefix='$', gridcolor=C['border'], tickfont=dict(color=C['muted'],size=11)),
-            legend=dict(orientation='h', y=-0.15, font=dict(size=11)))
-        st.plotly_chart(fig_opt, use_container_width=True, config={
-            'displayModeBar':True,'scrollZoom':True,
-            'modeBarButtonsToRemove':['lasso2d','select2d'],'displaylogo':False})
+        # ── Helpers date et tri ──
+        from datetime import datetime
+        _MONTHS = {'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,
+                   'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
+        def _parse_exp(s):
+            """Convertit '23JAN26' en datetime triable."""
+            try:
+                day = int(s[:2]); mon = _MONTHS.get(s[2:5].upper(),1); yr = 2000+int(s[5:])
+                return datetime(yr, mon, day)
+            except: return datetime(2099,1,1)
+        def _parse_date(s):
+            """Convertit '2026-01-23' en datetime triable."""
+            try: return datetime.strptime(s, '%Y-%m-%d')
+            except: return datetime(2099,1,1)
+        def _fmt_date(s):
+            """Formate '2026-01-23' → '23.01.2026'."""
+            try: return datetime.strptime(s, '%Y-%m-%d').strftime('%d.%m.%Y')
+            except: return s
+        def _fmt_exp(s):
+            """Formate '23JAN26' → '23.01.2026'."""
+            try:
+                d = _parse_exp(s)
+                return d.strftime('%d.%m.%Y') if d.year != 2099 else s
+            except: return s
 
         # ── Helpers cellules $+€ ──
         def _cell(usd, col, bold=False):
@@ -1173,6 +1204,31 @@ with tab4:
         # ── Tableau positions ouvertes ──
         if opts_open:
             sec(f"Positions ouvertes ({len(opts_open)})", "🟢", C['green'], "#0A1A0D")
+
+            # Contrôles de tri
+            _so_key = 'opt_open_sort'; _so_asc_key = 'opt_open_asc'
+            if _so_key not in st.session_state: st.session_state[_so_key] = 'expiration'
+            if _so_asc_key not in st.session_state: st.session_state[_so_asc_key] = True
+            _so_cols = st.columns([1,1,1,5])
+            _so_opts = [('expiration','Expiration'),('date','Ouverture'),('pl_net','P/L')]
+            for i,(sk,sl) in enumerate(_so_opts):
+                with _so_cols[i]:
+                    _active = st.session_state[_so_key] == sk
+                    _arrow = (' ↑' if st.session_state[_so_asc_key] else ' ↓') if _active else ''
+                    if st.button(f"{sl}{_arrow}", key=f"sort_o_{sk}", use_container_width=True):
+                        if st.session_state[_so_key] == sk:
+                            st.session_state[_so_asc_key] = not st.session_state[_so_asc_key]
+                        else:
+                            st.session_state[_so_key] = sk; st.session_state[_so_asc_key] = True
+                        st.rerun()
+
+            def _sort_key_open(o):
+                sk = st.session_state[_so_key]
+                if sk == 'expiration': return _parse_exp(o['expiration'])
+                if sk == 'date': return _parse_date(o['date'])
+                return o.get(sk, 0)
+            _open_sorted = sorted(opts_open, key=_sort_key_open, reverse=not st.session_state[_so_asc_key])
+
             _TH  = lambda t,w: f"<th style='padding:7px 10px;text-align:right;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']};width:{w}'>{t}</th>"
             _THL = lambda t,w: f"<th style='padding:7px 10px;text-align:left;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']};width:{w}'>{t}</th>"
             tbl_o = f"<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:12px'>"
@@ -1180,7 +1236,7 @@ with tab4:
             tbl_o += _THL("Symbole","22%") + _THL("Ticker","7%") + _THL("C/P","4%") + _THL("Strike","6%") + _THL("Expiration","8%") + _THL("Ouverture","8%") + _TH("Prime nette","15%") + _TH("Frais","10%") + _TH("P/L non réalisé","15%")
             tbl_o += "</tr></thead><tbody>"
             _tot_o_prime = _tot_o_frais = _tot_o_pl = 0.0
-            for o in sorted(opts_open, key=lambda x: x['expiration']):
+            for o in _open_sorted:
                 _cp_col  = C['purple'] if o['call_put'] == 'C' else C['gold']
                 _pl_col  = C['green'] if o['pl_net'] >= 0 else C['red']
                 _pn_col  = C['green'] if o['prime_nette'] >= 0 else C['red']
@@ -1190,8 +1246,8 @@ with tab4:
                 tbl_o += f"<td style='padding:7px 10px;font-weight:600;color:{C['text']}'>{o['ticker']}</td>"
                 tbl_o += f"<td style='padding:7px 10px;font-weight:700;color:{_cp_col}'>{o['call_put']}</td>"
                 tbl_o += f"<td style='padding:7px 10px;color:{C['text']}'>${o['strike']}</td>"
-                tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{o['expiration']}</td>"
-                tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{o['date']}</td>"
+                tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_exp(o['expiration'])}</td>"
+                tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_date(o['date'])}</td>"
                 tbl_o += _cell(o['prime_nette'], _pn_col, bold=True)
                 tbl_o += _cell_frais(o['frais'])
                 tbl_o += _cell(o['pl_net'], _pl_col, bold=True)
@@ -1211,21 +1267,66 @@ with tab4:
 
         # ── Tableau historique ──
         if opts_closed:
-            _stat_labels = ['Tous','Expirée','Roulée','Fermée']
-            _stat_key    = 'opt_stat_filter'
-            if _stat_key not in st.session_state: st.session_state[_stat_key] = 'Tous'
-
-            _sh1,_sh2,_sh3,_sh4,_sh5 = st.columns([2,1,1,1,4])
-            _stat_cols = [_sh2,_sh3,_sh4]
             sec(f"Historique trades ({len(opts_closed)})", "📋", C['muted'], "#0A0E1A")
-            for i,(sc2,sl) in enumerate(zip(_stat_cols,_stat_labels[1:])):
-                with sc2:
-                    if st.button(sl, key=f"stat_f_{sl}", use_container_width=True):
-                        st.session_state[_stat_key] = sl
+
+            # ── Filtres statut multi-sélection ──
+            _stat_sel_key = 'opt_stat_selected'
+            _all_statuts  = ['Expirée', 'Roulée', 'Fermée', 'Assignée']
+            # Garder uniquement les statuts présents dans les données
+            _present_statuts = sorted(set(o['statut'] for o in opts_closed))
+
+            if _stat_sel_key not in st.session_state:
+                st.session_state[_stat_sel_key] = {s: True for s in _all_statuts}
+            # Ajouter automatiquement les nouveaux statuts
+            for s in _present_statuts:
+                if s not in st.session_state[_stat_sel_key]:
+                    st.session_state[_stat_sel_key][s] = True
+
+            _stat_cols = st.columns([1]*len(_present_statuts) + [1, 3])
+            for i, s in enumerate(_present_statuts):
+                with _stat_cols[i]:
+                    _active = st.session_state[_stat_sel_key].get(s, True)
+                    _label  = f"✓ {s}" if _active else s
+                    _bg_col = {'Expirée':'#0D2A0D','Roulée':'#2A1800','Fermée':'#0D1A2A','Assignée':'#2A0D0D'}.get(s, C['card'])
+                    if st.button(_label, key=f"stat_tog_{s}", use_container_width=True):
+                        st.session_state[_stat_sel_key][s] = not _active
+                        st.rerun()
+            # Bouton ALL/Reset
+            with _stat_cols[len(_present_statuts)]:
+                _all_on = all(st.session_state[_stat_sel_key].get(s, True) for s in _present_statuts)
+                if st.button("ALL ✓" if _all_on else "ALL", key="stat_all", use_container_width=True):
+                    new_val = not _all_on
+                    for s in _present_statuts:
+                        st.session_state[_stat_sel_key][s] = True if not _all_on else (s == _present_statuts[0])
+                    st.rerun()
+
+            _active_statuts = [s for s in _present_statuts if st.session_state[_stat_sel_key].get(s, True)]
+            if not _active_statuts: _active_statuts = _present_statuts  # fallback
+            opts_display = [o for o in opts_closed if o['statut'] in _active_statuts]
+
+            # Contrôles de tri historique
+            _sh_key = 'opt_hist_sort'; _sh_asc_key = 'opt_hist_asc'
+            if _sh_key not in st.session_state: st.session_state[_sh_key] = 'date'
+            if _sh_asc_key not in st.session_state: st.session_state[_sh_asc_key] = False
+            _sh_sort_cols = st.columns([1,1,1,1,4])
+            _sh_opts = [('date','Ouverture'),('expiration','Expiration'),('pl_net','P/L'),('prime_nette','Prime')]
+            for i,(sk,sl) in enumerate(_sh_opts):
+                with _sh_sort_cols[i]:
+                    _active = st.session_state[_sh_key] == sk
+                    _arrow = (' ↑' if st.session_state[_sh_asc_key] else ' ↓') if _active else ''
+                    if st.button(f"{sl}{_arrow}", key=f"sort_h_{sk}", use_container_width=True):
+                        if st.session_state[_sh_key] == sk:
+                            st.session_state[_sh_asc_key] = not st.session_state[_sh_asc_key]
+                        else:
+                            st.session_state[_sh_key] = sk; st.session_state[_sh_asc_key] = True
                         st.rerun()
 
-            _sf = st.session_state[_stat_key]
-            opts_display = opts_closed if _sf == 'Tous' else [o for o in opts_closed if o['statut'] == _sf]
+            def _sort_key_hist(o):
+                sk = st.session_state[_sh_key]
+                if sk == 'expiration': return _parse_exp(o['expiration'])
+                if sk == 'date': return _parse_date(o['date'])
+                return o.get(sk, 0)
+            opts_display = sorted(opts_display, key=_sort_key_hist, reverse=not st.session_state[_sh_asc_key])
 
             def _scol(s):
                 return {
@@ -1244,7 +1345,7 @@ with tab4:
                       _TH("P/L net","13%") + _TH("Statut","8%"))
             tbl_h += "</tr></thead><tbody>"
             _tot_prime = _tot_frais = _tot_pl = 0.0
-            for o in sorted(opts_display, key=lambda x: x['date'], reverse=True):
+            for o in opts_display:
                 _cp_col  = C['purple'] if o['call_put'] == 'C' else C['gold']
                 _pl_col  = C['green'] if o['pl_net'] >= 0 else C['red']
                 _pn_col  = C['green'] if o['prime_nette'] >= 0 else C['red']
@@ -1255,8 +1356,8 @@ with tab4:
                 tbl_h += f"<td style='padding:7px 10px;font-weight:600;color:{C['text']}'>{o['ticker']}</td>"
                 tbl_h += f"<td style='padding:7px 10px;font-weight:700;color:{_cp_col}'>{o['call_put']}</td>"
                 tbl_h += f"<td style='padding:7px 10px;color:{C['text']}'>${o['strike']}</td>"
-                tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{o['expiration']}</td>"
-                tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{o['date']}</td>"
+                tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_exp(o['expiration'])}</td>"
+                tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_date(o['date'])}</td>"
                 tbl_h += _cell(o['prime_nette'], _pn_col, bold=True)
                 tbl_h += _cell_frais(o['frais'])
                 tbl_h += _cell(o['pl_net'], _pl_col, bold=True)
