@@ -825,115 +825,133 @@ padding:5px 8px;border-radius:6px;margin-bottom:3px;background:{C['card']};opaci
 # ══════════════════════════════════════════════════════
 
 def parse_ibkr_csv(content_bytes):
-    """Parse un CSV IBKR et retourne les données structurées complètes."""
-    import re as _re
-    lines = content_bytes.decode('utf-8-sig').splitlines()
+    """
+    Parse un CSV IBKR Activity Statement.
+    Structure réelle (16 colonnes fixes) :
+    [0]Section [1]Data [2]Order [3]AssetCategory [4]Currency [5]Symbol
+    [6]Date+Heure (fusionnés) [7]Qty [8]TPrice [9]CPrice [10]Proceeds
+    [11]Comm [12]Basis [13]RealPL [14]MTM [15]Code
+    """
+    import re as _re, csv as _csv, io as _io
 
-    # ── Année depuis la ligne Period ──
-    year = None
-    for line in lines[:10]:
-        if 'Period' in line:
+    for enc in ('utf-8-sig', 'utf-8', 'latin-1'):
+        try: text = content_bytes.decode(enc); break
+        except: continue
+    else: text = content_bytes.decode('latin-1', errors='replace')
+
+    lines = text.splitlines()
+
+    def sf(val):
+        """safe_float : None si vide ou non-numérique."""
+        v = str(val).strip()
+        if not v: return 0.0
+        try: return float(v)
+        except: return 0.0
+
+    def split_line(line):
+        try:
+            return [p.strip() for p in next(_csv.reader(_io.StringIO(line)))]
+        except:
+            return [p.strip().strip('"') for p in line.split(',')]
+
+    year = None; trades = []; positions_ouvertes = []
+    actif_net = None; frais_total = 0.0; fx_rates = []; depots = 0.0
+
+    OPT_KW = ("Options sur actions", "Options on Stock", "Options sur indices",
+               "Equity and Index Options", "Options")
+
+    for raw in lines:
+        line = raw.strip()
+        if not line: continue
+        parts = split_line(line)
+        if len(parts) < 3: continue
+        section = parts[0].strip()
+
+        # Année
+        if 'Period' in section or 'riode' in section:
             m = _re.search(r'(\d{4})', line)
             if m: year = int(m.group(1))
-            break
 
-    trades          = []
-    positions_ouvertes = []
-    actif_net       = None
-    frais_total     = 0.0
-    fx_rates        = []
-    depots          = 0.0   # dépôts nets (lignes individuelles EUR uniquement)
+        # Actif net
+        elif section in ("Actif net", "Net Asset Value") and len(parts) >= 4:
+            if parts[1] == "Data" and "Total" in parts[2]:
+                v = sf(parts[3])
+                if v > 0: actif_net = v
 
-    for line in lines:
-        parts = [p.strip().strip('"') for p in line.split(',')]
-        if len(parts) < 3: continue
-        section = parts[0]
+        # Dépôts
+        elif len(parts) >= 6 and ("retraits" in section or "Withdrawals" in section or "Deposits" in section):
+            if parts[1] == "Data" and parts[2].strip().upper() in ("EUR", "USD"):
+                v = sf(parts[5])
+                if v > 0: depots += v
 
-        # ── Actif net total en EUR (dernier CSV = valeur réelle du PF) ──
-        if section == "Actif net" and parts[1] == "Data" and parts[2] == "Total en EUR":
-            try:
-                val = float(parts[3].replace(',',''))
-                if val > 0: actif_net = val
-            except: pass
+        # Frais
+        elif section in ("Frais", "Fees") and len(parts) >= 6:
+            if parts[1] == "Data" and "Total" in parts[2]:
+                v = sf(parts[5])
+                if v: frais_total += abs(v)
 
-        # ── Dépôts : lignes individuelles EUR uniquement (pas les lignes Total) ──
-        if (section == "Dépôts et retraits" and parts[1] == "Data"
-                and parts[2] == "EUR" and len(parts) >= 6):
-            try:
-                val = float(parts[5].replace(',',''))
-                if val > 0: depots += val   # ignorer les retraits éventuels
-            except: pass
+        # Positions ouvertes
+        elif "Positions" in section and len(parts) > 12:
+            if parts[1] == "Data" and any(kw in (parts[3] if len(parts) > 3 else '') for kw in OPT_KW):
+                try:
+                    positions_ouvertes.append({
+                        'symbole':   parts[5],
+                        'quantite':  sf(parts[7]),
+                        'cours':     sf(parts[9]),
+                        'valeur':    sf(parts[10]),
+                        'pl_unreal': sf(parts[11]),
+                        'annee':     year
+                    })
+                except: pass
 
-        # ── Frais totaux en EUR ──
-        if section == "Frais" and parts[1] == "Data" and parts[2] == "Total en EUR":
-            try: frais_total = abs(float(parts[5].replace(',','')))
-            except: pass
+        # Transactions
+        elif section == "Transactions" and len(parts) >= 14:
+            if parts[1] != "Data": continue
+            if parts[2] in ("Header", "Total", "SubTotal", "Notes"): continue
+            asset = parts[3] if len(parts) > 3 else ''
 
-        # ── Positions ouvertes — options uniquement ──
-        if (section == "Positions ouvertes" and parts[1] == "Data"
-                and len(parts) > 12 and "Options" in parts[3]):
-            try:
-                positions_ouvertes.append({
-                    'symbole':   parts[5],
-                    'quantite':  float(parts[6]),
-                    'cours':     float(parts[10]),
-                    'valeur':    float(parts[11]),
-                    'pl_unreal': float(parts[12]),
-                    'annee':     year
-                })
-            except: pass
-
-        # ── Transactions options ──
-        # Format IBKR : [6]=date [7]=heure → colonnes décalées de +1
-        if (section == "Transactions" and parts[1] == "Data"
-                and parts[2] == "Order" and len(parts) > 16
-                and "Options" in parts[3]):
-            try:
+            # Options
+            if any(kw in asset for kw in OPT_KW):
+                if len(parts) < 16: continue
                 sym     = parts[5]
-                date_str= parts[6]
-                qty     = float(parts[8])  if parts[8]  else 0.0
-                prix    = float(parts[9])  if parts[9]  else 0.0
-                produit = float(parts[11]) if parts[11] else 0.0
-                frais   = float(parts[12]) if parts[12] else 0.0
-                pl_real = float(parts[14]) if parts[14] else 0.0
-                code    = parts[16]
+                date    = parts[6].split(',')[0].strip()
+                qty     = sf(parts[7])
+                prix    = sf(parts[8])
+                produit = sf(parts[10])
+                frais   = sf(parts[11])
+                pl_real = sf(parts[13])
+                code    = parts[15].strip() if len(parts) > 15 else ''
 
-                # Statut initial (sera affiné après fusion multi-CSV)
+                # Statut initial
                 if 'Ep' in code:              statut = 'Expirée'
-                elif 'A'  in code:            statut = 'Assignée'
+                elif 'A' in code:             statut = 'Assignée'
                 elif qty > 0 and 'C' in code: statut = 'Fermée'
                 elif qty < 0:                 statut = 'Ouverte'
-                else:                         statut = 'Clôturée'
+                else:                         statut  = 'Clôturée'
 
-                sym_parts  = sym.split()
+                sp = sym.split()
                 trades.append({
-                    'symbole':   sym,
-                    'ticker':    sym_parts[0] if sym_parts else sym,
-                    'call_put':  sym_parts[-1] if sym_parts else '',
-                    'strike':    sym_parts[-2] if len(sym_parts) >= 3 else '',
-                    'expiration':sym_parts[1]  if len(sym_parts) >= 2 else '',
-                    'date':      date_str,
-                    'quantite':  qty,
-                    'prix':      prix,
-                    'produit':   produit,
-                    'frais':     frais,
-                    'pl_realise':pl_real,
-                    'statut':    statut,
-                    'code':      code,
-                    'annee':     year
+                    'symbole':    sym,
+                    'ticker':     sp[0] if sp else sym,
+                    'call_put':   sp[-1] if sp else '',
+                    'strike':     sp[-2] if len(sp) >= 3 else '',
+                    'expiration': sp[1]  if len(sp) >= 2 else '',
+                    'date':       date,
+                    'quantite':   qty,
+                    'prix':       prix,
+                    'produit':    produit,
+                    'frais':      frais,
+                    'pl_realise': pl_real,
+                    'statut':     statut,
+                    'code':       code,
+                    'annee':      year
                 })
-            except: pass
 
-        # ── Taux EUR/USD depuis transactions Forex ──
-        if (section == "Transactions" and parts[1] == "Data"
-                and parts[2] == "Order" and "Forex" in parts[3]):
-            try:
-                if "EUR.USD" in parts[5]:
-                    fx = float(parts[9]) if parts[9] else 0.0
-                    if fx > 0: fx_rates.append(fx)
-            except: pass
-
-    fx_avg = sum(fx_rates) / len(fx_rates) if fx_rates else 1.16
+            # Forex EUR/USD
+            elif 'Forex' in asset:
+                if len(parts) > 8 and 'EUR.USD' in (parts[5] if len(parts) > 5 else ''):
+                    v = sf(parts[8])
+                    if 0.8 < v < 2.0: fx_rates.append(v)
 
     return {
         'year':      year,
@@ -941,11 +959,9 @@ def parse_ibkr_csv(content_bytes):
         'positions': positions_ouvertes,
         'actif_net': actif_net,
         'frais':     frais_total,
-        'fx':        fx_avg,
-        'depots':    depots,       # dépôts de cette année
+        'fx':        sum(fx_rates) / len(fx_rates) if fx_rates else 1.16,
+        'depots':    depots,
     }
-
-
 def get_trade_statut_final(sym, all_trades):
     """Détermine le statut final d'une option à partir de tous ses trades."""
     sym_trades = [t for t in all_trades if t['symbole'] == sym]
@@ -966,7 +982,7 @@ IBKR_DIR = Path(__file__).parent / "ibkr_data"
 IBKR_DIR.mkdir(exist_ok=True)
 
 # Version du cache — à incrémenter si parse_ibkr_csv change
-_PARSE_VERSION = "v3"
+_PARSE_VERSION = "v4"
 
 @st.cache_data(show_spinner=False)
 def parse_ibkr_cached(file_bytes, _version=_PARSE_VERSION):
