@@ -826,11 +826,13 @@ padding:5px 8px;border-radius:6px;margin-bottom:3px;background:{C['card']};opaci
 
 def parse_ibkr_csv(content_bytes):
     """
-    Parse un CSV IBKR Activity Statement.
-    Structure réelle (16 colonnes fixes) :
-    [0]Section [1]Data [2]Order [3]AssetCategory [4]Currency [5]Symbol
-    [6]Date+Heure (fusionnés) [7]Qty [8]TPrice [9]CPrice [10]Proceeds
-    [11]Comm [12]Basis [13]RealPL [14]MTM [15]Code
+    Parse un CSV IBKR Activity Statement (FR ou EN).
+    
+    Lit 3 sections du CSV :
+    1. "Synthèse de la performance réalisée et non-réalisée" → P/L réalisé par option (= valeurs vues dans l'interface IBKR)
+    2. "Transactions" (Options) → détail des trades (ouvertures, fermetures, expirations)
+    3. "Positions ouvertes" → positions encore ouvertes
+    4. "Dépôts et retraits", "Frais", "Actif net", Forex → KPIs globaux
     """
     import re as _re, csv as _csv, io as _io
 
@@ -842,9 +844,8 @@ def parse_ibkr_csv(content_bytes):
     lines = text.splitlines()
 
     def sf(val):
-        """safe_float : None si vide ou non-numérique."""
         v = str(val).strip()
-        if not v: return 0.0
+        if not v or v == '--': return 0.0
         try: return float(v)
         except: return 0.0
 
@@ -856,9 +857,14 @@ def parse_ibkr_csv(content_bytes):
 
     year = None; trades = []; positions_ouvertes = []
     actif_net = None; frais_total = 0.0; fx_rates = []; depots = 0.0
+    # Synthèse réalisée : {symbole: realise_total}
+    synthese_realise = {}
+    # Synthèse non-réalisée : {symbole: non_realise_total}
+    synthese_nonrealise = {}
 
     OPT_KW = ("Options sur actions", "Options on Stock", "Options sur indices",
                "Equity and Index Options", "Options")
+    SYNTH_SECTION = "Synthèse de la performance réalisée et non-réalisée"
 
     for raw in lines:
         line = raw.strip()
@@ -890,27 +896,39 @@ def parse_ibkr_csv(content_bytes):
                 v = sf(parts[5])
                 if v: frais_total += abs(v)
 
+        # ── Synthèse réalisée/non-réalisée (source de vérité pour le P/L) ──
+        elif section == SYNTH_SECTION and len(parts) >= 13:
+            if parts[1] == "Data" and any(kw in (parts[2] if len(parts)>2 else '') for kw in OPT_KW):
+                sym = parts[3]
+                # Layout: [2]=catégorie [3]=symbole [4]=aj_cout
+                # [5]=real_profit_ct [6]=real_perte_ct [7]=real_profit_lt [8]=real_perte_lt
+                # [9]=real_total  [10]=nonreal_profit_ct [11]=nonreal_perte_ct
+                # [12]=nonreal_profit_lt [13]=nonreal_perte_lt [14]=nonreal_total [15]=total
+                real_total    = sf(parts[9])  if len(parts) > 9  else 0.0
+                nonreal_total = sf(parts[14]) if len(parts) > 14 else 0.0
+                synthese_realise[sym]    = real_total
+                synthese_nonrealise[sym] = nonreal_total
+
         # Positions ouvertes
-        elif "Positions" in section and len(parts) > 12:
-            if parts[1] == "Data" and any(kw in (parts[3] if len(parts) > 3 else '') for kw in OPT_KW):
+        elif "Positions" in section and len(parts) > 10:
+            if parts[1] == "Data" and any(kw in (parts[3] if len(parts)>3 else '') for kw in OPT_KW):
                 try:
                     positions_ouvertes.append({
                         'symbole':   parts[5],
-                        'quantite':  sf(parts[7]),
-                        'cours':     sf(parts[9]),
-                        'valeur':    sf(parts[10]),
-                        'pl_unreal': sf(parts[11]),
+                        'quantite':  sf(parts[6]),
+                        'cours':     sf(parts[10]),
+                        'valeur':    sf(parts[11]),
+                        'pl_unreal': sf(parts[12]),
                         'annee':     year
                     })
                 except: pass
 
-        # Transactions
+        # Transactions options (pour le détail : date, code, statut)
         elif section == "Transactions" and len(parts) >= 14:
             if parts[1] != "Data": continue
             if parts[2] in ("Header", "Total", "SubTotal", "Notes"): continue
             asset = parts[3] if len(parts) > 3 else ''
 
-            # Options
             if any(kw in asset for kw in OPT_KW):
                 if len(parts) < 16: continue
                 sym     = parts[5]
@@ -919,15 +937,15 @@ def parse_ibkr_csv(content_bytes):
                 prix    = sf(parts[8])
                 produit = sf(parts[10])
                 frais   = sf(parts[11])
+                # P/L réalisé : on prend la valeur IBKR directe [13]
                 pl_real = sf(parts[13])
                 code    = parts[15].strip() if len(parts) > 15 else ''
 
-                # Statut initial
-                if 'Ep' in code:              statut = 'Expirée'
-                elif 'A' in code:             statut = 'Assignée'
-                elif qty > 0 and 'C' in code: statut = 'Fermée'
-                elif qty < 0:                 statut = 'Ouverte'
-                else:                         statut  = 'Clôturée'
+                if 'Ep' in code:               statut = 'Expirée'
+                elif 'A' in code:              statut = 'Assignée'
+                elif qty > 0 and 'C' in code:  statut = 'Fermée'
+                elif qty < 0:                  statut = 'Ouverte'
+                else:                          statut = 'Clôturée'
 
                 sp = sym.split()
                 trades.append({
@@ -947,20 +965,42 @@ def parse_ibkr_csv(content_bytes):
                     'annee':      year
                 })
 
-            # Forex EUR/USD
             elif 'Forex' in asset:
                 if len(parts) > 8 and 'EUR.USD' in (parts[5] if len(parts) > 5 else ''):
                     v = sf(parts[8])
                     if 0.8 < v < 2.0: fx_rates.append(v)
 
+    # ── Enrichir les trades avec le P/L de la Synthèse ──────────────────
+    # La Synthèse donne le P/L NET (après frais, ajustements) par symbole
+    # On l'attache au premier trade de fermeture/expiration de chaque symbole
+    by_sym = {}
+    for t in trades:
+        s = t['symbole']
+        if s not in by_sym: by_sym[s] = []
+        by_sym[s].append(t)
+
+    for sym, sym_trades in by_sym.items():
+        synth_pl = synthese_realise.get(sym, None)
+        if synth_pl is None: continue
+        # Trouver le trade de clôture/expiration et y mettre le P/L de synthèse
+        close_trades = [t for t in sym_trades if t['statut'] in ('Expirée','Fermée','Assignée','Clôturée')]
+        if close_trades:
+            # Distribuer le P/L total sur le dernier trade de fermeture
+            close_trades[-1]['pl_realise'] = synth_pl
+            # Mettre à 0 les autres trades de fermeture pour éviter double-compte
+            for t in close_trades[:-1]:
+                t['pl_realise'] = 0.0
+
     return {
-        'year':      year,
-        'trades':    trades,
-        'positions': positions_ouvertes,
-        'actif_net': actif_net,
-        'frais':     frais_total,
-        'fx':        sum(fx_rates) / len(fx_rates) if fx_rates else 1.16,
-        'depots':    depots,
+        'year':               year,
+        'trades':             trades,
+        'positions':          positions_ouvertes,
+        'actif_net':          actif_net,
+        'frais':              frais_total,
+        'fx':                 sum(fx_rates) / len(fx_rates) if fx_rates else 1.16,
+        'depots':             depots,
+        'synthese_realise':   synthese_realise,
+        'synthese_nonrealise':synthese_nonrealise,
     }
 def get_trade_statut_final(sym, all_trades):
     """Détermine le statut final d'une option à partir de tous ses trades."""
@@ -982,7 +1022,7 @@ IBKR_DIR = Path(__file__).parent / "ibkr_data"
 IBKR_DIR.mkdir(exist_ok=True)
 
 # Version du cache — à incrémenter si parse_ibkr_csv change
-_PARSE_VERSION = "v4"
+_PARSE_VERSION = "v5"
 
 @st.cache_data(show_spinner=False)
 def parse_ibkr_cached(file_bytes, _version=_PARSE_VERSION):
