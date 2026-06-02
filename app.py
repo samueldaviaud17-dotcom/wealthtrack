@@ -1058,7 +1058,7 @@ with tab4:
     _cr_col1, _cr_col2, _cr_col3, _cr_col4, _cr_col5 = st.columns(5)
 
     with _cr_col1:
-        st.markdown(card("CAPITAL RÉEL", f"{st.session_state['capital_reel']:,.2f} €",
+        st.markdown(card("CAPITAL RÉEL", f"{st.session_state['capital_reel']:.2f} €",
                          "← modifiable ci-dessous", C['teal'], "🏦"), unsafe_allow_html=True)
         _new_cr = st.number_input("Capital réel (€)", value=float(st.session_state['capital_reel']),
                                   min_value=0.0, format="%.2f",
@@ -1069,11 +1069,11 @@ with tab4:
             st.rerun()
 
     with _cr_col2:
-        st.markdown(card("CAPITAL INVESTI", f"{_cap_inv:,.2f} €",
+        st.markdown(card("CAPITAL INVESTI", f"{_cap_inv:.2f} €",
                          "depuis ouverture du compte", C['blue'], "💰"), unsafe_allow_html=True)
 
     with _cr_col3:
-        st.markdown(card("CAPITAL ACTUEL", f"{_cap_act:,.2f} €",
+        st.markdown(card("CAPITAL ACTUEL", f"{_cap_act:.2f} €",
                          "investi + primes en €", C['purple'], "📈"), unsafe_allow_html=True)
 
     # cols 4 et 5 seront remplis APRÈS le filtre années (voir plus bas)
@@ -1249,14 +1249,14 @@ border:1px solid {C['gold']}44'>
 <div style='font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px'>
 💰 PRIMES ENCAISSÉES</div>
 <div style='font-size:18px;font-weight:700;color:{C['gold']};font-family:Space Grotesk'>
-${_primes_n_f:,.2f}</div>
-<div style='font-size:11px;color:{C['muted']};margin-top:2px'>{_primes_n_f/_fx:,.2f} € · logique sheet</div>
+${_primes_n_f:.2f}</div>
+<div style='font-size:11px;color:{C['muted']};margin-top:2px'>{_primes_n_f/_fx:.2f} € · logique sheet</div>
 <div style='border-top:1px solid {C['border']};margin:8px 0'></div>
 <div style='font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px'>
 💹 P/L NET IBKR</div>
 <div style='font-size:16px;font-weight:700;color:{pcol(_pl_ibkr_f)};font-family:Space Grotesk'>
-${_pl_ibkr_f:+,.2f}</div>
-<div style='font-size:11px;color:{C['muted']};margin-top:2px'>{_pl_ibkr_f/_fx:+,.2f} € · comptable IBKR</div>
+${_pl_ibkr_f:+.2f}</div>
+<div style='font-size:11px;color:{C['muted']};margin-top:2px'>{_pl_ibkr_f/_fx:+.2f} € · comptable IBKR</div>
 </div>""", unsafe_allow_html=True)
 
         def _cell(usd, col, bold=False):
