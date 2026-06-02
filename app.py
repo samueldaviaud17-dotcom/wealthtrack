@@ -965,9 +965,12 @@ def get_trade_statut_final(sym, all_trades):
 IBKR_DIR = Path(__file__).parent / "ibkr_data"
 IBKR_DIR.mkdir(exist_ok=True)
 
+# Version du cache — à incrémenter si parse_ibkr_csv change
+_PARSE_VERSION = "v3"
+
 @st.cache_data(show_spinner=False)
-def parse_ibkr_cached(file_bytes):
-    """Parse et cache le résultat — clé = contenu binaire du fichier."""
+def parse_ibkr_cached(file_bytes, _version=_PARSE_VERSION):
+    """Parse et cache le résultat — clé = contenu + version."""
     return parse_ibkr_csv(file_bytes)
 
 def load_all_ibkr():
@@ -975,7 +978,7 @@ def load_all_ibkr():
     data = {}
     for csv_file in sorted(IBKR_DIR.glob("*.csv")):
         try:
-            parsed = parse_ibkr_cached(csv_file.read_bytes())
+            parsed = parse_ibkr_cached(csv_file.read_bytes(), _version=_PARSE_VERSION)
             if parsed['year']:
                 data[parsed['year']] = parsed
         except Exception:
@@ -1021,8 +1024,11 @@ def compute_ibkr_kpis(ibkr_data):
     }
 
 # ── Chargement initial depuis disque (persistant entre sessions) ──
-if 'ibkr_data' not in st.session_state:
+# Forcer le rechargement si la version du parser a changé
+if ('ibkr_data' not in st.session_state or
+        st.session_state.get('ibkr_parse_version') != _PARSE_VERSION):
     st.session_state['ibkr_data'] = load_all_ibkr()
+    st.session_state['ibkr_parse_version'] = _PARSE_VERSION
 
 # ── Capital réel persistant (saisie manuelle) ──
 _CAPITAL_REEL_FILE = Path(__file__).parent / "ibkr_data" / "capital_reel.json"
@@ -1093,7 +1099,7 @@ with tab4:
         if uploaded_csvs:
             for f in uploaded_csvs:
                 file_bytes = f.read()
-                parsed = parse_ibkr_cached(file_bytes)
+                parsed = parse_ibkr_cached(file_bytes, _version=_PARSE_VERSION)
                 if parsed['year']:
                     # Sauvegarder sur disque avec nom normalisé
                     dest = IBKR_DIR / f"ibkr_{parsed['year']}.csv"
