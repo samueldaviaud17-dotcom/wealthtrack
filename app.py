@@ -1290,7 +1290,7 @@ ${_pl_ibkr_f:+.2f}</div>
         _k1,_k2,_k3,_k4,_k5 = st.columns(5)
         with _k1: st.markdown(card("TRADES CLÔTURÉS", str(_nb_total), f"{len(opts_open)} ouvert(s)", C['purple'],"⚙️"), unsafe_allow_html=True)
         with _k2: st.markdown(card("WIN RATE", f"{_win_rate:.0f}%", f"{_nb_exp} expirées / {_nb_ass} roulées/fermées", C['green'] if _win_rate >= 70 else C['gold'],"✅"), unsafe_allow_html=True)
-        with _k3: st.markdown(card("P/L RÉALISÉ", f"${_total_pl:.2f}", f"{_eur(_total_pl):.2f} €", pcol(_total_pl),"💰"), unsafe_allow_html=True)
+        with _k3: st.markdown(card("PRIME OBTENUE", f"${_total_pl:.2f}", f"{_eur(_total_pl):.2f} €", pcol(_total_pl),"💰"), unsafe_allow_html=True)
         with _k4: st.markdown(card("FRAIS TOTAUX", f"-${_total_frais:.2f}", f"-{_eur(_total_frais):.2f} €", C['red'],"📋"), unsafe_allow_html=True)
         with _k5: st.markdown(card("NET (P/L−frais)", f"${_total_pl - _total_frais:.2f}", f"{_eur(_total_pl - _total_frais):.2f} €", pcol(_total_pl - _total_frais),"💹"), unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
@@ -1333,6 +1333,10 @@ ${_pl_ibkr_f:+.2f}</div>
                     f"<span style='color:{C["red"]};font-size:12px'>-${usd:.2f}</span><br>"
                     f"<span style='color:{C["red"]};font-size:10px;opacity:.8'>-{usd/_fx:.2f}€</span></td>")
 
+        # ── Helpers en-têtes tableaux ──
+        _TH  = lambda t,w: f"<th style='padding:7px 10px;text-align:right;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']};width:{w}'>{t}</th>"
+        _THL = lambda t,w: f"<th style='padding:7px 10px;text-align:left;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']};width:{w}'>{t}</th>"
+
         # ── Tableau positions ouvertes ──
         if opts_open:
             sec(f"Positions ouvertes ({len(opts_open)})", "🟢", C['green'], "#0A1A0D")
@@ -1361,11 +1365,9 @@ ${_pl_ibkr_f:+.2f}</div>
                 return o.get(sk, 0)
             _open_sorted = sorted(opts_open, key=_sort_key_open, reverse=not st.session_state[_so_asc_key])
 
-            _TH  = lambda t,w: f"<th style='padding:7px 10px;text-align:right;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']};width:{w}'>{t}</th>"
-            _THL = lambda t,w: f"<th style='padding:7px 10px;text-align:left;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']};width:{w}'>{t}</th>"
             tbl_o = f"<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:12px'>"
             tbl_o += "<thead><tr style='background:#0A1A0D'>"
-            tbl_o += _THL("Symbole","22%") + _THL("Ticker","7%") + _THL("C/P","4%") + _THL("Strike","6%") + _THL("Expiration","8%") + _THL("Ouverture","8%") + _TH("Prime nette","15%") + _TH("Frais","10%") + _TH("P/L non réalisé","15%")
+            tbl_o += _THL("Symbole","26%") + _THL("Ticker","8%") + _THL("C/P","5%") + _THL("Strike","7%") + _THL("Expiration","9%") + _THL("Ouverture","9%") + _TH("Prime encaissée","18%") + _TH("Frais","13%")
             tbl_o += "</tr></thead><tbody>"
             _tot_o_prime = _tot_o_frais = _tot_o_pl = 0.0
             for o in _open_sorted:
@@ -1382,7 +1384,6 @@ ${_pl_ibkr_f:+.2f}</div>
                 tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_date(o['date'])}</td>"
                 tbl_o += _cell(o['prime_nette'], _pn_col, bold=True)
                 tbl_o += _cell_frais(o['frais'])
-                tbl_o += _cell(o['pl_net'], _pl_col, bold=True)
                 tbl_o += "</tr>"
             # Ligne total
             _tp_col = C['green'] if _tot_o_prime >= 0 else C['red']
@@ -1391,7 +1392,6 @@ ${_pl_ibkr_f:+.2f}</div>
             tbl_o += f"<td colspan='6' style='padding:8px 10px;color:{C['muted']};font-size:11px;text-transform:uppercase;letter-spacing:.05em'>Total</td>"
             tbl_o += _cell(_tot_o_prime, _tp_col, bold=True)
             tbl_o += _cell_frais(_tot_o_frais)
-            tbl_o += _cell(_tot_o_pl, _tpl_col, bold=True)
             tbl_o += "</tr>"
             tbl_o += "</tbody></table></div>"
             st.markdown(tbl_o, unsafe_allow_html=True)
@@ -1472,9 +1472,9 @@ ${_pl_ibkr_f:+.2f}</div>
             tbl_h += "<thead><tr style='background:#111827'>"
             tbl_h += (_THL("Symbole","20%") + _THL("Ticker","6%") + _THL("C/P","4%") + _THL("Strike","6%") +
                       _THL("Expiration","8%") + _THL("Ouverture","8%") +
-                      _TH("Prime nette","13%") +
+                      _TH("Prime encaissée","13%") +
                       _TH("Frais","8%") +
-                      _TH("P/L net","13%") + _TH("Statut","8%"))
+                      _TH("Prime obtenue","13%") + _TH("Statut","8%"))
             tbl_h += "</tr></thead><tbody>"
             _tot_prime = _tot_frais = _tot_pl = 0.0
             for o in opts_display:
