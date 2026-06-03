@@ -1136,8 +1136,11 @@ def compute_ibkr_kpis(ibkr_data, **kwargs):
         v for d in ibkr_data.values()
         for v in d.get('synthese_profit_ct', {}).values()
     )
-    # Taux EUR/USD : utilise le taux live si disponible (passé en kwargs)
-    # sinon fallback sur le taux moyen des CSV
+    # Taux FX moyen des CSV (calculé avant le fallback)
+    fx_rates = [d.get('fx', 1.16) for d in ibkr_data.values() if 0.8 <= d.get('fx', 0) <= 1.8]
+    fx = sum(fx_rates) / len(fx_rates) if fx_rates else 1.16
+
+    # Taux EUR/USD : live si disponible, sinon taux moyen des CSV
     fx_live = kwargs.get('fx_live', None)
     fx_historique = fx_live if fx_live and 0.8 < fx_live < 2.0 else fx
     primes_brutes_usd = profit_ct_eur * fx_historique
@@ -1148,10 +1151,6 @@ def compute_ibkr_kpis(ibkr_data, **kwargs):
 
     # ROI = primes nettes / capital investi
     roi = (primes_nettes_eur / capital_investi * 100) if capital_investi > 0 else 0.0
-
-    # Taux FX moyen
-    fx_rates = [d.get('fx', 1.16) for d in ibkr_data.values() if 0.8 <= d.get('fx', 0) <= 1.8]
-    fx = sum(fx_rates) / len(fx_rates) if fx_rates else 1.16
 
     return {
         'capital_investi':  capital_investi,
