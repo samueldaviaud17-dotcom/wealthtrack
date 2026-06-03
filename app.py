@@ -926,9 +926,9 @@ def parse_ibkr_csv(content_bytes):
         if len(parts) < 3: continue
         s = parts[0].strip()
 
-        # Année
-        if 'Period' in s or 'riode' in s:
-            m = _re.search(r'(\d{4})', line)
+        # Année : section Statement, champ Period
+        if s == "Statement" and len(parts) >= 3 and parts[2] == "Period":
+            m = _re.search(r'(\d{4})', parts[3] if len(parts) > 3 else line)
             if m: year = int(m.group(1))
 
         # Actif net (EUR)
@@ -1316,6 +1316,9 @@ with tab4:
                 type_tr = f"Vente {lbl}"
             # Nb contrats = valeur absolue de la quantité du trade d'ouverture
             nb_contrats = int(abs(open_trade.get('quantite', 1)))
+            # Année = trade de clôture si disponible (ex: vendu en déc 2025, expiré janv 2026 → 2026)
+            close_trade = next((t for t in sym_trades if t['quantite'] > 0), None)
+            annee_ref = close_trade['annee'] if close_trade else open_trade['annee']
             options_consolidated.append({
                 'symbole': sym, 'ticker': open_trade['ticker'],
                 'call_put': open_trade['call_put'], 'strike': open_trade['strike'],
@@ -1323,7 +1326,7 @@ with tab4:
                 'prime_nette': prime_nette, 'frais': frais_tot,
                 'pl_net': pl_net, 'statut': statut_final,
                 'type_trade': type_tr, 'nb_contrats': nb_contrats,
-                'annee': open_trade['annee']
+                'annee': annee_ref
             })
 
         # ── Filtre années multi-sélection ──
