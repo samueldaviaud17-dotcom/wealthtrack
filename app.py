@@ -1782,17 +1782,6 @@ border:1px solid {C['gold']}44'>
             except: return s
 
         # ── Helpers cellules $+€ ──
-        def _cell(usd, col, bold=False):
-            fw = "font-weight:700;" if bold else ""
-            sign = "+" if usd > 0 else ("-" if usd < 0 else "")
-            abs_usd = abs(usd); abs_eur = abs(usd / _fx)
-            return (f"<td style='padding:6px 10px;text-align:right'>"
-                    f"<span style='{fw}color:{col};font-size:12px'>{sign}${abs_usd:.2f}</span><br>"
-                    f"<span style='color:{col};font-size:10px;opacity:.8'>{sign}{abs_eur:.2f}€</span></td>")
-        def _cell_frais(usd):
-            return (f"<td style='padding:6px 10px;text-align:right'>"
-                    f"<span style='color:{C["red"]};font-size:12px'>-${usd:.2f}</span><br>"
-                    f"<span style='color:{C["red"]};font-size:10px;opacity:.8'>-{usd/_fx:.2f}€</span></td>")
 
         # ── Helpers en-têtes tableaux ──
         _TH  = lambda t,w: f"<th style='padding:7px 10px;text-align:right;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']};width:{w}'>{t}</th>"
@@ -1845,7 +1834,7 @@ border:1px solid {C['gold']}44'>
                 tbl_o += f"<td style='padding:7px 10px'><span style='background:{_tt_col}22;color:{_tt_col};border-radius:6px;padding:2px 6px;font-size:10px;font-weight:700;white-space:nowrap'>{_tt}</span></td>"
                 tbl_o += f"<td style='padding:7px 10px;text-align:center;font-weight:700;color:{C['text']}'>{o.get('nb_contrats',1)}</td>"
                 tbl_o += f"<td style='padding:7px 10px;font-weight:700;color:{_cp_col}'>{o['call_put']}</td>"
-                tbl_o += f"<td style='padding:7px 10px;color:{C['text']}'>{o['strike']}</td>"
+                tbl_o += f"<td style='padding:7px 10px;color:{C['text']}'>${o['strike']}</td>"
                 tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_date(o['date'])}</td>"
                 tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_exp(o['expiration'])}</td>"
                 # Nb jours restants avant expiration
@@ -1993,7 +1982,7 @@ border:1px solid {C['gold']}44'>
                 tbl_h += f"<td style='padding:7px 10px'><span style='background:{_tt_col}22;color:{_tt_col};border-radius:6px;padding:2px 6px;font-size:10px;font-weight:700;white-space:nowrap'>{_tt}</span></td>"
                 tbl_h += f"<td style='padding:7px 10px;text-align:center;font-weight:700;color:{C['text']}'>{o.get('nb_contrats',1)}</td>"
                 tbl_h += f"<td style='padding:7px 10px;font-weight:700;color:{_cp_col}'>{o['call_put']}</td>"
-                tbl_h += f"<td style='padding:7px 10px;color:{C['text']}'>{o['strike']}</td>"
+                tbl_h += f"<td style='padding:7px 10px;color:{C['text']}'>${o['strike']}</td>"
                 tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_exp(o['expiration'])}</td>"
                 tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_date(o['date'])}</td>"
                 tbl_h += _cell(o['prime_nette'], _pn_col, bold=True)
