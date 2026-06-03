@@ -1067,15 +1067,7 @@ def parse_ibkr_csv(content_bytes):
         'cours_sous_jacents': cours_sous_jacents,
     }
 
-"""
-Parser IBKR HTML - extraction via BeautifulSoup
-Tables identifiées par leur contenu (robuste aux changements de layout) :
-  - Table "Realisé|Non réalisé"  → synthèse P/L par symbole
-  - Table "Symbole|Date/Heure"   → transactions (trades détaillés)
-  - Table "Symbole|Quantité|Mult|Coût" → positions ouvertes
-  - Table "Date|Description|Montant"  → dépôts + frais
-  - Table "Nom|..." ou Period    → année / infos compte
-"""
+
 
 def parse_ibkr_html(content_bytes):
     try:
@@ -1853,7 +1845,7 @@ border:1px solid {C['gold']}44'>
                 tbl_o += f"<td style='padding:7px 10px'><span style='background:{_tt_col}22;color:{_tt_col};border-radius:6px;padding:2px 6px;font-size:10px;font-weight:700;white-space:nowrap'>{_tt}</span></td>"
                 tbl_o += f"<td style='padding:7px 10px;text-align:center;font-weight:700;color:{C['text']}'>{o.get('nb_contrats',1)}</td>"
                 tbl_o += f"<td style='padding:7px 10px;font-weight:700;color:{_cp_col}'>{o['call_put']}</td>"
-                tbl_o += f"<td style='padding:7px 10px;color:{C['text']}'>${o['strike']}</td>"
+                tbl_o += f"<td style='padding:7px 10px;color:{C['text']}'>{o['strike']}</td>"
                 tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_date(o['date'])}</td>"
                 tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_exp(o['expiration'])}</td>"
                 # Nb jours restants avant expiration
@@ -2001,7 +1993,7 @@ border:1px solid {C['gold']}44'>
                 tbl_h += f"<td style='padding:7px 10px'><span style='background:{_tt_col}22;color:{_tt_col};border-radius:6px;padding:2px 6px;font-size:10px;font-weight:700;white-space:nowrap'>{_tt}</span></td>"
                 tbl_h += f"<td style='padding:7px 10px;text-align:center;font-weight:700;color:{C['text']}'>{o.get('nb_contrats',1)}</td>"
                 tbl_h += f"<td style='padding:7px 10px;font-weight:700;color:{_cp_col}'>{o['call_put']}</td>"
-                tbl_h += f"<td style='padding:7px 10px;color:{C['text']}'>${o['strike']}</td>"
+                tbl_h += f"<td style='padding:7px 10px;color:{C['text']}'>{o['strike']}</td>"
                 tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_exp(o['expiration'])}</td>"
                 tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_date(o['date'])}</td>"
                 tbl_h += _cell(o['prime_nette'], _pn_col, bold=True)
