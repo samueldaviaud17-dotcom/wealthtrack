@@ -1066,6 +1066,275 @@ def parse_ibkr_csv(content_bytes):
         'synthese_nonrealise':synthese_nonrealise,
         'cours_sous_jacents': cours_sous_jacents,
     }
+
+"""
+Parser IBKR HTML - extraction via BeautifulSoup
+Tables identifiées par leur contenu (robuste aux changements de layout) :
+  - Table "Realisé|Non réalisé"  → synthèse P/L par symbole
+  - Table "Symbole|Date/Heure"   → transactions (trades détaillés)
+  - Table "Symbole|Quantité|Mult|Coût" → positions ouvertes
+  - Table "Date|Description|Montant"  → dépôts + frais
+  - Table "Nom|..." ou Period    → année / infos compte
+"""
+
+def parse_ibkr_html(content_bytes):
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return None
+
+    for enc in ('utf-8-sig', 'utf-8', 'latin-1'):
+        try: text = content_bytes.decode(enc); break
+        except: continue
+    else: text = content_bytes.decode('latin-1', errors='replace')
+
+    soup = BeautifulSoup(text, 'lxml')
+    tables = soup.find_all('table')
+
+    def sf(val):
+        """safe float"""
+        v = str(val).strip().replace('\xa0','').replace(',','').replace(' ','')
+        if not v or v in ('--','-',''):  return 0.0
+        try: return float(v)
+        except: return 0.0
+
+    def get_rows(tbl):
+        """Retourne toutes les lignes comme listes de strings."""
+        rows = []
+        for tr in tbl.find_all('tr'):
+            cells = [td.get_text(separator=' ', strip=True).replace('\xa0',' ')
+                     for td in tr.find_all(['td','th'])]
+            if any(c.strip() for c in cells):
+                rows.append(cells)
+        return rows
+
+    def find_table(keyword_row):
+        """Trouve une table dont une des premières lignes contient tous les mots-clés."""
+        for tbl in tables:
+            rows = get_rows(tbl)
+            for row in rows[:3]:
+                joined = '|'.join(row)
+                if all(kw in joined for kw in keyword_row):
+                    return tbl, rows
+        return None, []
+
+    # ── Initialisation ──────────────────────────────────
+    year             = None
+    trades           = []
+    positions_ouvertes = []
+    actif_net        = None
+    frais_total      = 0.0
+    depots           = 0.0
+    synthese_realise   = {}   # {sym: total réalisé €}
+    synthese_profit_ct = {}   # {sym: profit CT €}
+    synthese_perte_ct  = {}   # {sym: perte CT €}
+    synthese_nonrealise= {}   # {sym: non-réalisé total €}
+    cours_sous_jacents = {}   # {ticker: cours €}
+
+    # ── Année depuis table infos compte ─────────────────
+    for tbl in tables:
+        rows = get_rows(tbl)
+        for row in rows[:3]:
+            joined = '|'.join(row)
+            # "May 29, 2026" ou "December 31, 2025"
+            import re as _re
+            m = _re.search(r'(\d{4})', joined)
+            if m and 'January' in joined or 'February' in joined or \
+               'March' in joined or 'April' in joined or 'May' in joined or \
+               'June' in joined or 'July' in joined or 'August' in joined or \
+               'September' in joined or 'October' in joined or 'November' in joined or \
+               'December' in joined:
+                years_found = _re.findall(r'(20\d\d)', joined)
+                if years_found:
+                    year = int(max(years_found))  # année la plus récente
+                    break
+        if year: break
+
+    # ── Synthèse réalisée/non-réalisée ──────────────────
+    # Table avec "Realisé" et "Non réalisé" dans les 3 premières lignes
+    tbl_synth, rows_synth = find_table(['Realisé'])
+    if tbl_synth:
+        # Colonnes : Symbole | Aj.coût | Profit_CT | Perte_CT | PL_T | PL_LT | Total_réal | NonReal_PCT | ... | Total_nonreal | Total
+        # Index :      0         1          2           3          4      5        6             7                    11             12
+        in_options = False
+        for row in rows_synth[2:]:  # skip 2 lignes d'en-tête
+            if not row or not row[0].strip(): continue
+            sym = row[0].strip()
+            if sym == 'Options sur actions et indices': in_options = True; continue
+            if sym in ('Actions','Forex','Total (Tous les actifs)','Total Actions','Total Forex','Total Options sur actions et indices'):
+                if sym != 'Options sur actions et indices': in_options = False
+                continue
+            if not in_options: continue
+            if sym.startswith('Total'): continue
+            if len(row) >= 7:
+                profit_ct  = sf(row[2])
+                perte_ct   = sf(row[3])
+                total_real = sf(row[6]) if len(row) > 6 else 0.0
+                nonreal    = sf(row[11]) if len(row) > 11 else 0.0
+                synthese_realise[sym]    = total_real
+                synthese_profit_ct[sym]  = profit_ct
+                synthese_perte_ct[sym]   = perte_ct
+                synthese_nonrealise[sym] = nonreal
+
+    # ── Cours sous-jacents depuis synthèse évaluée ──────
+    # Table avec "Quantité|Prix|Pertes et profits"
+    tbl_eval, rows_eval = find_table(['Quantité','Prix','Pertes et profits'])
+    if tbl_eval:
+        in_actions = False
+        for row in rows_eval[2:]:
+            if not row: continue
+            sym = row[0].strip()
+            if sym == 'Actions': in_actions = True; continue
+            if sym in ('Options sur actions et indices','Forex','Total Actions',
+                       'Total (Tous les actifs)','Total Forex','Other Fees',
+                       'P/L Total pour période relevé de compte'): in_actions = False; continue
+            if not in_actions or sym.startswith('Total') or not sym: continue
+            # Cours actuel = col[4] (prix courant)
+            if len(row) > 4:
+                cours = sf(row[4])
+                if cours > 0:
+                    cours_sous_jacents[sym] = cours
+
+    # ── Transactions (trades) ────────────────────────────
+    # Table avec "Symbole|Date/Heure|Quantité|Prix trans."
+    tbl_tx, rows_tx = find_table(['Symbole','Date/Heure','Quantité','Prix trans.'])
+    if tbl_tx:
+        import re as _re
+        OPT_SECTION = False
+        for row in rows_tx[1:]:
+            if not row: continue
+            sym = row[0].strip()
+            # Détection section Options
+            if sym == 'Options sur actions et indices': OPT_SECTION = True; continue
+            if sym in ('Actions','Forex','Contrats à terme'): OPT_SECTION = False; continue
+            if not OPT_SECTION: continue
+            # Sauter les lignes Total et les en-têtes
+            if sym.startswith('Total') or sym == 'Symbole' or not sym: continue
+            if len(row) < 9: continue
+
+            date_str = row[1].split(',')[0].strip() if len(row) > 1 else ''
+            qty      = sf(row[2])
+            prix     = sf(row[3])
+            produit  = sf(row[5])
+            comm     = sf(row[6])
+            pl_real  = sf(row[8])
+            pl_mtm   = sf(row[9]) if len(row) > 9 else 0.0
+            code     = row[10].strip() if len(row) > 10 else ''
+
+            if 'Ep' in code:              statut = 'Expirée'
+            elif 'A' in code:             statut = 'Assignée'
+            elif qty > 0 and 'C' in code: statut = 'Fermée'
+            elif qty < 0:                 statut = 'Ouverte'
+            else:                         statut = 'Clôturée'
+
+            sp = sym.split()
+            cp = sp[-1] if sp else ''
+            lbl = 'Put' if cp == 'P' else 'Call'
+            type_trade = f"{'Vente' if qty < 0 else 'Achat'} {lbl}" if cp in ('P','C') else ''
+
+            trades.append({
+                'symbole':    sym,
+                'ticker':     sp[0] if sp else sym,
+                'call_put':   cp,
+                'strike':     sp[-2] if len(sp) >= 3 else '',
+                'expiration': sp[1]  if len(sp) >= 2 else '',
+                'date':       date_str,
+                'quantite':   qty,
+                'prix':       prix,
+                'produit':    produit,
+                'frais':      comm,
+                'pl_realise': 0.0,  # sera rempli depuis synthèse
+                'statut':     statut,
+                'code':       code,
+                'type_trade': type_trade,
+                'annee':      year,
+            })
+
+    # ── Injecter P/L depuis synthèse dans trades ─────────
+    by_sym = {}
+    for t in trades:
+        by_sym.setdefault(t['symbole'], []).append(t)
+    for sym, sym_trades in by_sym.items():
+        pl_eur = synthese_realise.get(sym)
+        if pl_eur is None: continue
+        close_trades = [t for t in sym_trades if t['statut'] in ('Expirée','Fermée','Assignée','Clôturée')]
+        if close_trades:
+            close_trades[-1]['pl_realise'] = pl_eur
+
+    # ── Positions ouvertes ───────────────────────────────
+    tbl_pos, rows_pos = find_table(['Symbole','Quantité','Mult','Coût'])
+    if tbl_pos:
+        in_opts = False
+        for row in rows_pos:
+            if not row: continue
+            sym = row[0].strip()
+            if sym == 'Options sur actions et indices': in_opts = True; continue
+            if sym in ('Actions','Total','Total en EUR','Symbole','USD','EUR'): continue
+            if not in_opts or sym.startswith('Total') or not sym: continue
+            if len(row) < 7: continue
+            positions_ouvertes.append({
+                'symbole':   sym,
+                'quantite':  sf(row[1]),
+                'cours':     sf(row[5]),
+                'valeur':    sf(row[6]),
+                'pl_unreal': sf(row[7]) if len(row) > 7 else 0.0,
+                'annee':     year,
+            })
+
+    # ── Dépôts ───────────────────────────────────────────
+    for tbl in tables:
+        rows = get_rows(tbl)
+        for i, row in enumerate(rows):
+            if not row: continue
+            if row[0].strip() == 'Date' and len(row) >= 3 and 'Montant' in row[-1]:
+                # C'est une table dépôts ou frais
+                in_eur = False
+                for r in rows[i+1:]:
+                    if not r: continue
+                    label = r[0].strip()
+                    if label == 'EUR': in_eur = True; continue
+                    if label in ('USD','Total','Total en EUR') or label.startswith('Total'): break
+                    if in_eur and len(r) >= 3 and r[-1].strip():
+                        v = sf(r[-1])
+                        if v > 0: depots += v
+                break
+
+    # ── Frais totaux ─────────────────────────────────────
+    for tbl in tables:
+        rows = get_rows(tbl)
+        for i, row in enumerate(rows):
+            joined = '|'.join(row)
+            if 'Total' in joined and 'Autres frais' in joined and 'EUR' in joined:
+                # Ligne "Total Autres frais en EUR"
+                v = sf(row[-1]) if row else 0.0
+                if v < 0: frais_total += abs(v)
+                break
+
+    # ── Actif net (depuis table infos compte) ─────────────
+    for tbl in tables:
+        rows = get_rows(tbl)
+        for row in rows:
+            if 'Total' in row[0] and len(row) >= 4:
+                v = sf(row[3]) if len(row) > 3 else 0.0
+                if v > 1000: actif_net = v; break
+
+    return {
+        'year':               year,
+        'trades':             trades,
+        'positions':          positions_ouvertes,
+        'actif_net':          actif_net,
+        'frais':              frais_total,
+        'fx':                 1.16,   # HTML est en EUR, pas de taux FX à extraire
+        'depots':             depots,
+        'synthese_realise':   synthese_realise,
+        'synthese_profit_ct': synthese_profit_ct,
+        'synthese_perte_ct':  synthese_perte_ct,
+        'synthese_nonrealise':synthese_nonrealise,
+        'cours_sous_jacents': cours_sous_jacents,
+    }
+
+
+
 def get_trade_statut_final(sym, all_trades):
     """Détermine le statut final d'une option à partir de tous ses trades."""
     sym_trades = [t for t in all_trades if t['symbole'] == sym]
@@ -1106,13 +1375,23 @@ def parse_ibkr_cached(file_bytes, _version=_PARSE_VERSION):
     return parse_ibkr_csv(file_bytes)
 
 def load_all_ibkr():
-    """Charge et parse tous les CSV présents sur le disque."""
+    """Charge et parse tous les fichiers HTML et CSV présents sur le disque.
+    Les HTML sont prioritaires sur les CSV pour la même année."""
     data = {}
+    # D'abord les CSV (format ancien)
     for csv_file in sorted(IBKR_DIR.glob("*.csv")):
         try:
             parsed = parse_ibkr_cached(csv_file.read_bytes(), _version=_PARSE_VERSION)
-            if parsed['year']:
+            if parsed and parsed['year']:
                 data[parsed['year']] = parsed
+        except Exception:
+            pass
+    # Ensuite les HTML (prioritaires — écrasent le CSV de la même année)
+    for html_file in sorted(IBKR_DIR.glob("*.htm")) + sorted(IBKR_DIR.glob("*.html")):
+        try:
+            parsed = parse_ibkr_html(html_file.read_bytes())
+            if parsed and parsed['year']:
+                data[parsed['year']] = parsed  # remplace le CSV si même année
         except Exception:
             pass
     return data
@@ -1239,19 +1518,24 @@ with tab4:
     # ── Zone import ──
     _col_import, _col_badges = st.columns([2, 3])
     with _col_import:
-        uploaded_csvs = st.file_uploader(
-            "Importer relevé(s) IBKR (.csv)",
-            type=['csv'], accept_multiple_files=True,
+        uploaded_files = st.file_uploader(
+            "Importer relevé(s) IBKR (.htm ou .csv)",
+            type=['htm','html','csv'], accept_multiple_files=True,
             label_visibility="collapsed",
             key="ibkr_uploader"
         )
-        if uploaded_csvs:
-            for f in uploaded_csvs:
+        if uploaded_files:
+            for f in uploaded_files:
                 file_bytes = f.read()
-                parsed = parse_ibkr_cached(file_bytes, _version=_PARSE_VERSION)
-                if parsed['year']:
-                    # Sauvegarder sur disque avec nom normalisé
-                    dest = IBKR_DIR / f"ibkr_{parsed['year']}.csv"
+                fname = f.name.lower()
+                if fname.endswith('.htm') or fname.endswith('.html'):
+                    parsed = parse_ibkr_html(file_bytes)
+                    ext = '.htm'
+                else:
+                    parsed = parse_ibkr_cached(file_bytes, _version=_PARSE_VERSION)
+                    ext = '.csv'
+                if parsed and parsed['year']:
+                    dest = IBKR_DIR / f"ibkr_{parsed['year']}{ext}"
                     dest.write_bytes(file_bytes)
                     st.session_state['ibkr_data'][parsed['year']] = parsed
 
@@ -1271,8 +1555,9 @@ with tab4:
                 _yr_to_del = st.selectbox("Supprimer :", ["—"] + [str(y) for y in loaded_years],
                                           label_visibility="collapsed", key="ibkr_del_sel")
                 if _yr_to_del != "—":
-                    _del_file = IBKR_DIR / f"ibkr_{_yr_to_del}.csv"
-                    if _del_file.exists(): _del_file.unlink()
+                    for _ext in ('.htm', '.html', '.csv'):
+                        _del_file = IBKR_DIR / f"ibkr_{_yr_to_del}{_ext}"
+                        if _del_file.exists(): _del_file.unlink()
                     if int(_yr_to_del) in st.session_state['ibkr_data']:
                         del st.session_state['ibkr_data'][int(_yr_to_del)]
                     st.rerun()
