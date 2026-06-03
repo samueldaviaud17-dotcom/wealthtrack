@@ -1088,7 +1088,7 @@ def parse_ibkr_html(content_bytes):
         except: continue
     else: text = content_bytes.decode('latin-1', errors='replace')
 
-    soup = BeautifulSoup(text, 'lxml')
+    soup = BeautifulSoup(text, 'html.parser')
     tables = soup.find_all('table')
 
     def sf(val):
@@ -1375,24 +1375,14 @@ def parse_ibkr_cached(file_bytes, _version=_PARSE_VERSION):
     return parse_ibkr_csv(file_bytes)
 
 def load_all_ibkr():
-    """Charge et parse tous les fichiers HTML et CSV présents sur le disque.
-    Les HTML sont prioritaires sur les CSV pour la même année."""
+    """Charge et parse tous les fichiers HTML présents sur le disque."""
     data = {}
-    # D'abord les CSV (format ancien)
-    for csv_file in sorted(IBKR_DIR.glob("*.csv")):
-        try:
-            parsed = parse_ibkr_cached(csv_file.read_bytes(), _version=_PARSE_VERSION)
-            if parsed and parsed['year']:
-                data[parsed['year']] = parsed
-        except Exception:
-            pass
-    # Ensuite les HTML (prioritaires — écrasent le CSV de la même année)
-    for html_file in sorted(IBKR_DIR.glob("*.htm")) + sorted(IBKR_DIR.glob("*.html")):
+    for html_file in sorted(list(IBKR_DIR.glob("*.htm")) + list(IBKR_DIR.glob("*.html"))):
         try:
             parsed = parse_ibkr_html(html_file.read_bytes())
             if parsed and parsed['year']:
-                data[parsed['year']] = parsed  # remplace le CSV si même année
-        except Exception:
+                data[parsed['year']] = parsed
+        except Exception as e:
             pass
     return data
 
@@ -1519,25 +1509,20 @@ with tab4:
     _col_import, _col_badges = st.columns([2, 3])
     with _col_import:
         uploaded_files = st.file_uploader(
-            "Importer relevé(s) IBKR (.htm ou .csv)",
-            type=['htm','html','csv'], accept_multiple_files=True,
+            "Importer relevé(s) IBKR (.htm)",
+            type=['htm','html'], accept_multiple_files=True,
             label_visibility="collapsed",
             key="ibkr_uploader"
         )
         if uploaded_files:
             for f in uploaded_files:
                 file_bytes = f.read()
-                fname = f.name.lower()
-                if fname.endswith('.htm') or fname.endswith('.html'):
-                    parsed = parse_ibkr_html(file_bytes)
-                    ext = '.htm'
-                else:
-                    parsed = parse_ibkr_cached(file_bytes, _version=_PARSE_VERSION)
-                    ext = '.csv'
+                parsed = parse_ibkr_html(file_bytes)
                 if parsed and parsed['year']:
-                    dest = IBKR_DIR / f"ibkr_{parsed['year']}{ext}"
+                    dest = IBKR_DIR / f"ibkr_{parsed['year']}.htm"
                     dest.write_bytes(file_bytes)
                     st.session_state['ibkr_data'][parsed['year']] = parsed
+                    st.session_state.pop('options_auto_refreshed', None)
 
     with _col_badges:
         loaded_years = sorted(st.session_state['ibkr_data'].keys())
@@ -1555,7 +1540,7 @@ with tab4:
                 _yr_to_del = st.selectbox("Supprimer :", ["—"] + [str(y) for y in loaded_years],
                                           label_visibility="collapsed", key="ibkr_del_sel")
                 if _yr_to_del != "—":
-                    for _ext in ('.htm', '.html', '.csv'):
+                    for _ext in ('.htm', '.html'):
                         _del_file = IBKR_DIR / f"ibkr_{_yr_to_del}{_ext}"
                         if _del_file.exists(): _del_file.unlink()
                     if int(_yr_to_del) in st.session_state['ibkr_data']:
