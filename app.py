@@ -1644,16 +1644,18 @@ with tab4:
         opts_open    = [o for o in opts_filtered if o['statut'] == 'Ouverte']
         opts_closed  = [o for o in opts_filtered if o['statut'] != 'Ouverte']
 
-        # ── Cours des sous-jacents : live (yfinance) avec fallback CSV ──
-        _cours_actions = {}
-        # D'abord les cours CSV (base)
-        for _yr_d in st.session_state['ibkr_data'].values():
-            for _tk, _c in _yr_d.get('cours_sous_jacents', {}).items():
-                if _c > 0:
-                    _cours_actions[_tk] = _c
-        # Puis écrase avec les cours live si disponibles
+        # ── Cours des sous-jacents : UNIQUEMENT Yahoo Finance (live) ──
+        # Fallback sur les cours HTML uniquement si pas encore rafraîchi
         _live = st.session_state.get('options_cours_live', {})
-        _cours_actions.update(_live)
+        if _live:
+            _cours_actions = _live  # toujours prioritaire
+        else:
+            # Fallback HTML en attendant le refresh auto
+            _cours_actions = {}
+            for _yr_d in st.session_state['ibkr_data'].values():
+                for _tk, _c in _yr_d.get('cours_sous_jacents', {}).items():
+                    if _c > 0:
+                        _cours_actions[_tk] = _c
         _last_opt_refresh = st.session_state.get('options_cours_last_refresh', None)
 
         # ── Taux EUR/USD : moyenne des taux valides sur années sélectionnées ──
@@ -1818,7 +1820,7 @@ border:1px solid {C['gold']}44'>
 
             tbl_o = f"<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:12px'>"
             tbl_o += "<thead><tr style='background:#0A1A0D'>"
-            tbl_o += _THL("Symbole","16%") + _THL("Ticker","5%") + _THL("Type","8%") + _THC("Qté","4%") + _THL("C/P","3%") + _THL("Strike","5%") + _THL("Ouverture","6%") + _THL("Expiration","6%") + _THC("J. restants","6%") + _THC("Marge","6%") + _TH("Prime enc.","11%") + _TH("Frais","7%")
+            tbl_o += _THL("Symbole","14%") + _THL("Ticker","5%") + _THL("Type","8%") + _THC("Qté","4%") + _THL("C/P","3%") + _THL("Strike","5%") + _THL("Ouverture","6%") + _THL("Expiration","6%") + _THC("J. restants","6%") + _THC("Marge","6%") + _TH("Prime enc.","9%") + _TH("Frais","7%") + _TH("Prime obtenue","9%")
             tbl_o += "</tr></thead><tbody>"
             _tot_o_prime = _tot_o_frais = _tot_o_pl = 0.0
             for o in _open_sorted:
@@ -1875,14 +1877,18 @@ border:1px solid {C['gold']}44'>
                 tbl_o += _m_cell
                 tbl_o += _cell(o['prime_nette'], _pn_col, bold=True)
                 tbl_o += _cell_frais(o['frais'])
+                _po = o['prime_nette'] - o['frais']
+                tbl_o += _cell(_po, C['green'] if _po >= 0 else C['red'], bold=True)
                 tbl_o += "</tr>"
             # Ligne total
             _tp_col = C['green'] if _tot_o_prime >= 0 else C['red']
             _tpl_col = C['green'] if _tot_o_pl >= 0 else C['red']
             tbl_o += f"<tr style='background:{C['card']};border-top:2px solid {C['border']};font-weight:700'>"
-            tbl_o += f"<td colspan='6' style='padding:8px 10px;color:{C['muted']};font-size:11px;text-transform:uppercase;letter-spacing:.05em'>Total</td>"
-            tbl_o += _cell(_tot_o_prime, _tp_col, bold=True)
+            _tot_o_net = _tot_o_prime - _tot_o_frais
+            tbl_o += f"<td colspan='10' style='padding:8px 10px;color:{C['muted']};font-size:11px;text-transform:uppercase;letter-spacing:.05em'>Total</td>"
+            tbl_o += _cell(_tot_o_prime, C['green'] if _tot_o_prime >= 0 else C['red'], bold=True)
             tbl_o += _cell_frais(_tot_o_frais)
+            tbl_o += _cell(_tot_o_net, C['green'] if _tot_o_net >= 0 else C['red'], bold=True)
             tbl_o += "</tr>"
             tbl_o += "</tbody></table></div>"
             st.markdown(tbl_o, unsafe_allow_html=True)
@@ -1994,10 +2000,10 @@ border:1px solid {C['gold']}44'>
             _tp_col  = C['green'] if _tot_prime >= 0 else C['red']
             _tpl_col = C['green'] if _tot_pl    >= 0 else C['red']
             tbl_h += f"<tr style='background:{C['card']};border-top:2px solid {C['border']};font-weight:700'>"
-            tbl_h += f"<td colspan='6' style='padding:8px 10px;color:{C['muted']};font-size:11px;text-transform:uppercase;letter-spacing:.05em'>Total ({len(opts_display)} trades)</td>"
-            tbl_h += _cell(_tot_prime, _tp_col, bold=True)
+            tbl_h += f"<td colspan='8' style='padding:8px 10px;color:{C['muted']};font-size:11px;text-transform:uppercase;letter-spacing:.05em'>Total ({len(opts_display)} trades)</td>"
+            tbl_h += _cell(_tot_prime, C['green'] if _tot_prime >= 0 else C['red'], bold=True)
             tbl_h += _cell_frais(_tot_frais)
-            tbl_h += _cell(_tot_pl, _tpl_col, bold=True)
+            tbl_h += _cell(_tot_pl, C['green'] if _tot_pl >= 0 else C['red'], bold=True)
             tbl_h += "<td></td></tr>"
             tbl_h += "</tbody></table></div>"
             st.markdown(tbl_h, unsafe_allow_html=True)
