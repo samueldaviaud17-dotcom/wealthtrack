@@ -109,6 +109,18 @@ def refresh_watchlist_cours():
     from datetime import datetime as _dt; st.session_state["watchlist_last_refresh"] = _dt.now().strftime("%H:%M:%S")
     st.session_state["watchlist_updated_count"] = updated
 
+# ── Taux EUR/USD live ────────────────────────────────
+def get_eurusd_live():
+    """Récupère le taux EUR/USD en temps réel via yfinance."""
+    if not YF_AVAILABLE: return None
+    try:
+        fx = yf.Ticker("EURUSD=X").fast_info.last_price
+        if fx and 0.8 < fx < 2.0:
+            st.session_state['eurusd_live'] = fx
+            return fx
+    except: pass
+    return st.session_state.get('eurusd_live', None)
+
 # ── Refresh cours sous-jacents options ───────────────
 def refresh_options_cours():
     """Récupère le cours live (yfinance) pour chaque sous-jacent des options ouvertes."""
@@ -229,6 +241,7 @@ with _rbtn[1]:
         help="Rafraîchit Google Sheet + cours live"):
         refresh_watchlist_cours()
         refresh_options_cours()
+        get_eurusd_live()
         st.cache_data.clear()
         st.rerun()
 
@@ -1104,7 +1117,7 @@ def load_all_ibkr():
             pass
     return data
 
-def compute_ibkr_kpis(ibkr_data):
+def compute_ibkr_kpis(ibkr_data, **kwargs):
     """Calcule tous les KPIs globaux depuis l ensemble des CSV chargés.
     Toutes les valeurs sont en EUR (les CSV IBKR sont déjà en EUR via Synthèse)."""
     all_trades = []
@@ -1123,7 +1136,10 @@ def compute_ibkr_kpis(ibkr_data):
         v for d in ibkr_data.values()
         for v in d.get('synthese_profit_ct', {}).values()
     )
-    fx_historique = 1.075  # taux EUR/USD moyen historique (2023-2026)
+    # Taux EUR/USD : utilise le taux live si disponible (passé en kwargs)
+    # sinon fallback sur le taux moyen des CSV
+    fx_live = kwargs.get('fx_live', None)
+    fx_historique = fx_live if fx_live and 0.8 < fx_live < 2.0 else fx
     primes_brutes_usd = profit_ct_eur * fx_historique
     primes_brutes_eur = profit_ct_eur  # valeur EUR brute (avant conversion)
 
@@ -1160,6 +1176,7 @@ if ('ibkr_data' not in st.session_state or
 if not st.session_state.get('options_auto_refreshed', False) and YF_AVAILABLE:
     if st.session_state.get('ibkr_data'):
         refresh_options_cours()
+        get_eurusd_live()
         st.session_state['options_auto_refreshed'] = True
 
 # ── Capital réel persistant (saisie manuelle) ──
@@ -1181,7 +1198,8 @@ if 'capital_reel' not in st.session_state:
 with tab4:
     # ── KPIs GLOBAUX (tous CSV, indépendants du filtre années) ──
     # Capital investi, capital réel, capital actuel → toujours sur ALL
-    _ibkr_kpis_all = compute_ibkr_kpis(st.session_state['ibkr_data'])
+    _fx_live = st.session_state.get('eurusd_live', None)
+    _ibkr_kpis_all = compute_ibkr_kpis(st.session_state['ibkr_data'], fx_live=_fx_live)
     _cap_inv  = _ibkr_kpis_all['capital_investi']
     _cap_act  = _ibkr_kpis_all['capital_actuel']
     _fx_glob  = _ibkr_kpis_all['fx']
@@ -1383,7 +1401,8 @@ with tab4:
         # ── KPIs ROI + Primes filtrés par années sélectionnées ──
         _ibkr_kpis_filtered = compute_ibkr_kpis(
             {y: st.session_state['ibkr_data'][y] for y in active_years
-             if y in st.session_state['ibkr_data']}
+             if y in st.session_state['ibkr_data']},
+            fx_live=_fx_live
         )
         _primes_n_f = _ibkr_kpis_filtered['primes_nettes_eur']
         _roi_f      = _ibkr_kpis_filtered['roi']
