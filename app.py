@@ -109,6 +109,40 @@ def refresh_watchlist_cours():
     from datetime import datetime as _dt; st.session_state["watchlist_last_refresh"] = _dt.now().strftime("%H:%M:%S")
     st.session_state["watchlist_updated_count"] = updated
 
+# ── Refresh cours sous-jacents options ───────────────
+def refresh_options_cours():
+    """Récupère le cours live (yfinance) pour chaque sous-jacent des options ouvertes."""
+    if not YF_AVAILABLE: return
+    ibkr_data = st.session_state.get('ibkr_data', {})
+    if not ibkr_data: return
+    # Collecter tous les tickers uniques des options encore ouvertes
+    tickers_set = set()
+    for yr_data in ibkr_data.values():
+        for t in yr_data.get('trades', []):
+            if t.get('statut') == 'Ouverte':
+                tickers_set.add(t.get('ticker', ''))
+    tickers_set.discard('')
+    if not tickers_set: return
+    updated = {}
+    for ticker in tickers_set:
+        try:
+            tk  = yf.Ticker(ticker)
+            fi  = tk.fast_info
+            price_raw = getattr(fi, 'last_price', None) or getattr(fi, 'regular_market_price', None)
+            cur = getattr(fi, 'currency', 'USD') or 'USD'
+            if price_raw:
+                # Convertir en EUR si USD
+                try:
+                    fx = yf.Ticker('EURUSD=X').fast_info.last_price if cur == 'USD' else 1.0
+                    if not fx: fx = 1.16
+                except: fx = 1.16
+                updated[ticker] = round(float(price_raw) / fx, 4)
+        except: pass
+    if updated:
+        st.session_state['options_cours_live'] = updated
+        from datetime import datetime as _dt
+        st.session_state['options_cours_last_refresh'] = _dt.now().strftime('%H:%M:%S')
+
 # ── Helpers ────────────────────────────────────────────
 def v(df, r, c, d=0):
     try:
@@ -194,6 +228,7 @@ with _rbtn[1]:
     if st.button("↻ Rafraîchir", key="global_refresh_btn", use_container_width=True,
         help="Rafraîchit Google Sheet + cours live"):
         refresh_watchlist_cours()
+        refresh_options_cours()
         st.cache_data.clear()
         st.rerun()
 
@@ -825,140 +860,224 @@ padding:5px 8px;border-radius:6px;margin-bottom:3px;background:{C['card']};opaci
 # ══════════════════════════════════════════════════════
 
 def parse_ibkr_csv(content_bytes):
-    """Parse un CSV IBKR et retourne les données structurées complètes."""
-    import re as _re
-    lines = content_bytes.decode('utf-8-sig').splitlines()
+    """
+    Parse un CSV IBKR Activity Statement (FR).
+    Source de vérité : "Synthèse de la performance réalisée et non-réalisée"
+    Toutes les valeurs sont en EUR (converties par IBKR).
+    Layout colonne Synthèse:
+      [2]=catégorie [3]=symbole [4]=aj_coût
+      [5]=réal_profit_CT [6]=réal_perte_CT [7]=réal_profit_LT [8]=réal_perte_LT
+      [9]=réal_total  [10]=nonréal_profit_CT [11]=nonréal_perte_CT
+      [12]=nonréal_profit_LT [13]=nonréal_perte_LT [14]=nonréal_total [15]=total
+    Layout colonne Transactions options (16 colonnes fixes):
+      [5]=sym [6]=date+heure [7]=qty [8]=tprice [9]=cprice [10]=produit
+      [11]=comm [12]=base [13]=pl_réalisé [14]=pl_mtm [15]=code
+    """
+    import re as _re, csv as _csv, io as _io
 
-    # ── Année depuis la ligne Period ──
-    year = None
-    for line in lines[:10]:
-        if 'Period' in line:
+    for enc in ('utf-8-sig', 'utf-8', 'latin-1'):
+        try: text = content_bytes.decode(enc); break
+        except: continue
+    else: text = content_bytes.decode('latin-1', errors='replace')
+
+    lines = text.splitlines()
+
+    def sf(val):
+        v = str(val).strip()
+        if not v or v == '--': return 0.0
+        try: return float(v)
+        except: return 0.0
+
+    def split_line(line):
+        try:
+            return [p.strip() for p in next(_csv.reader(_io.StringIO(line)))]
+        except:
+            return [p.strip().strip('"') for p in line.split(',')]
+
+    year = None; trades = []; positions_ouvertes = []
+    actif_net = None; frais_total = 0.0; fx_rates = []; depots = 0.0
+    synthese_realise = {}     # {sym: réalisé total en EUR (net)}
+    synthese_profit_ct = {}   # {sym: gains uniquement (Profit C/T)}
+    synthese_perte_ct  = {}   # {sym: pertes uniquement (Perte C/T)}
+    synthese_nonrealise = {}  # {sym: non-réalisé total en EUR}
+    cours_sous_jacents = {}   # {ticker: cours actuel}
+
+    OPT_KW = ("Options sur actions", "Options on Stock", "Options sur indices",
+               "Equity and Index Options", "Options")
+    SYNTH = "Synthèse de la performance réalisée et non-réalisée"
+
+    for raw in lines:
+        line = raw.strip()
+        if not line: continue
+        parts = split_line(line)
+        if len(parts) < 3: continue
+        s = parts[0].strip()
+
+        # Année
+        if 'Period' in s or 'riode' in s:
             m = _re.search(r'(\d{4})', line)
             if m: year = int(m.group(1))
-            break
 
-    trades          = []
-    positions_ouvertes = []
-    actif_net       = None
-    frais_total     = 0.0
-    fx_rates        = []
-    depots          = 0.0   # dépôts nets (lignes individuelles EUR uniquement)
+        # Actif net (EUR)
+        elif s in ("Actif net", "Net Asset Value") and len(parts) >= 4:
+            if parts[1] == "Data" and "Total" in parts[2]:
+                v = sf(parts[3])
+                if v > 0: actif_net = v
 
-    for line in lines:
-        parts = [p.strip().strip('"') for p in line.split(',')]
-        if len(parts) < 3: continue
-        section = parts[0]
+        # Dépôts (EUR uniquement)
+        elif len(parts) >= 6 and ("retraits" in s or "Withdrawals" in s or "Deposits" in s):
+            if parts[1] == "Data" and parts[2].strip().upper() == "EUR":
+                v = sf(parts[5])
+                if v > 0: depots += v
 
-        # ── Actif net total en EUR (dernier CSV = valeur réelle du PF) ──
-        if section == "Actif net" and parts[1] == "Data" and parts[2] == "Total en EUR":
-            try:
-                val = float(parts[3].replace(',',''))
-                if val > 0: actif_net = val
-            except: pass
+        # Frais (EUR)
+        elif s in ("Frais", "Fees") and len(parts) >= 6:
+            if parts[1] == "Data" and "Total" in parts[2]:
+                v = sf(parts[5])
+                if v: frais_total += abs(v)
 
-        # ── Dépôts : lignes individuelles EUR uniquement (pas les lignes Total) ──
-        if (section == "Dépôts et retraits" and parts[1] == "Data"
-                and parts[2] == "EUR" and len(parts) >= 6):
-            try:
-                val = float(parts[5].replace(',',''))
-                if val > 0: depots += val   # ignorer les retraits éventuels
-            except: pass
+        # ── Cours actions depuis Synthèse prix du marché ──
+        elif "évaluée au prix du marché" in s and len(parts) >= 8:
+            if parts[1] == "Data" and parts[2] == "Actions" and parts[3] not in ('','Total','--'):
+                ticker_u = parts[3]
+                cours_u  = sf(parts[7]) if len(parts) > 7 else 0.0
+                if cours_u > 0:
+                    cours_sous_jacents[ticker_u] = cours_u
 
-        # ── Frais totaux en EUR ──
-        if section == "Frais" and parts[1] == "Data" and parts[2] == "Total en EUR":
-            try: frais_total = abs(float(parts[5].replace(',','')))
-            except: pass
+        # ── Synthèse réalisée (SOURCE DE VÉRITÉ - tout en EUR) ──
+        elif s == SYNTH and len(parts) >= 10:
+            if parts[1] != "Data": continue
+            cat = parts[2] if len(parts) > 2 else ''
+            if not any(kw in cat for kw in OPT_KW): continue
+            sym = parts[3]
+            real_total    = sf(parts[9])   # col [9] = Réalisé Total (net gains+pertes)
+            profit_ct     = sf(parts[5])   # col [5] = Réalisé Profit C/T (gains seulement)
+            perte_ct      = sf(parts[6])   # col [6] = Réalisé Perte C/T (pertes seulement)
+            nonreal_total = sf(parts[14]) if len(parts) > 14 else 0.0
+            synthese_realise[sym]    = real_total
+            synthese_profit_ct[sym]  = profit_ct
+            synthese_perte_ct[sym]   = perte_ct
+            synthese_nonrealise[sym] = nonreal_total
 
-        # ── Positions ouvertes — options uniquement ──
-        if (section == "Positions ouvertes" and parts[1] == "Data"
-                and len(parts) > 12 and "Options" in parts[3]):
-            try:
-                positions_ouvertes.append({
-                    'symbole':   parts[5],
-                    'quantite':  float(parts[6]),
-                    'cours':     float(parts[10]),
-                    'valeur':    float(parts[11]),
-                    'pl_unreal': float(parts[12]),
-                    'annee':     year
-                })
-            except: pass
+        # Positions ouvertes
+        elif "Positions" in s and len(parts) > 12:
+            if parts[1] == "Data" and any(kw in (parts[3] if len(parts)>3 else '') for kw in OPT_KW):
+                try:
+                    positions_ouvertes.append({
+                        'symbole':   parts[5],
+                        'quantite':  sf(parts[6]),
+                        'cours':     sf(parts[10]),
+                        'valeur':    sf(parts[11]),
+                        'pl_unreal': sf(parts[12]),
+                        'annee':     year
+                    })
+                except: pass
 
-        # ── Transactions options ──
-        # Format IBKR : [6]=date [7]=heure → colonnes décalées de +1
-        if (section == "Transactions" and parts[1] == "Data"
-                and parts[2] == "Order" and len(parts) > 16
-                and "Options" in parts[3]):
-            try:
+        # Transactions options (pour date, statut, détail)
+        elif s == "Transactions" and len(parts) >= 14:
+            if parts[1] != "Data": continue
+            if parts[2] in ("Header", "Total", "SubTotal", "Notes"): continue
+            asset = parts[3] if len(parts) > 3 else ''
+            if any(kw in asset for kw in OPT_KW):
+                if len(parts) < 16: continue
                 sym     = parts[5]
-                date_str= parts[6]
-                qty     = float(parts[8])  if parts[8]  else 0.0
-                prix    = float(parts[9])  if parts[9]  else 0.0
-                produit = float(parts[11]) if parts[11] else 0.0
-                frais   = float(parts[12]) if parts[12] else 0.0
-                pl_real = float(parts[14]) if parts[14] else 0.0
-                code    = parts[16]
-
-                # Statut initial (sera affiné après fusion multi-CSV)
-                if 'Ep' in code:              statut = 'Expirée'
-                elif 'A'  in code:            statut = 'Assignée'
-                elif qty > 0 and 'C' in code: statut = 'Fermée'
-                elif qty < 0:                 statut = 'Ouverte'
-                else:                         statut = 'Clôturée'
-
-                sym_parts  = sym.split()
+                date    = parts[6].split(',')[0].strip()
+                qty     = sf(parts[7])
+                prix    = sf(parts[8])
+                produit = sf(parts[10])  # produit en USD (brut transaction)
+                frais   = sf(parts[11])  # frais en USD
+                code    = parts[15].strip() if len(parts) > 15 else ''
+                if 'Ep' in code:               statut = 'Expirée'
+                elif 'A' in code:              statut = 'Assignée'
+                elif qty > 0 and 'C' in code:  statut = 'Fermée'
+                elif qty < 0:                  statut = 'Ouverte'
+                else:                          statut = 'Clôturée'
+                sp = sym.split()
+                cp = sp[-1] if sp else ''  # C ou P
+                # Type exact : VENTE PUT, VENTE CALL, ACHAT PUT, ACHAT CALL
+                if qty < 0:
+                    type_trade = f"Vente {'Put' if cp=='P' else 'Call'}"
+                else:
+                    type_trade = f"Achat {'Put' if cp=='P' else 'Call'}"
                 trades.append({
-                    'symbole':   sym,
-                    'ticker':    sym_parts[0] if sym_parts else sym,
-                    'call_put':  sym_parts[-1] if sym_parts else '',
-                    'strike':    sym_parts[-2] if len(sym_parts) >= 3 else '',
-                    'expiration':sym_parts[1]  if len(sym_parts) >= 2 else '',
-                    'date':      date_str,
-                    'quantite':  qty,
-                    'prix':      prix,
-                    'produit':   produit,
-                    'frais':     frais,
-                    'pl_realise':pl_real,
-                    'statut':    statut,
-                    'code':      code,
-                    'annee':     year
+                    'symbole':    sym,
+                    'ticker':     sp[0] if sp else sym,
+                    'call_put':   cp,
+                    'strike':     sp[-2] if len(sp) >= 3 else '',
+                    'expiration': sp[1]  if len(sp) >= 2 else '',
+                    'date':       date,
+                    'quantite':   qty,
+                    'prix':       prix,
+                    'produit':    produit,
+                    'frais':      frais,
+                    'pl_realise': 0.0,  # sera rempli depuis synthèse ci-dessous
+                    'statut':     statut,
+                    'code':       code,
+                    'type_trade': type_trade,
+                    'annee':      year
                 })
-            except: pass
+            elif 'Forex' in asset:
+                if len(parts) > 8 and 'EUR.USD' in (parts[5] if len(parts)>5 else ''):
+                    v = sf(parts[8])
+                    if 0.8 < v < 2.0: fx_rates.append(v)
 
-        # ── Taux EUR/USD depuis transactions Forex ──
-        if (section == "Transactions" and parts[1] == "Data"
-                and parts[2] == "Order" and "Forex" in parts[3]):
-            try:
-                if "EUR.USD" in parts[5]:
-                    fx = float(parts[9]) if parts[9] else 0.0
-                    if fx > 0: fx_rates.append(fx)
-            except: pass
+    # ── Injecter le P/L EUR depuis la Synthèse dans les trades ──────────
+    # Grouper trades par symbole
+    by_sym = {}
+    for t in trades:
+        by_sym.setdefault(t['symbole'], []).append(t)
 
-    fx_avg = sum(fx_rates) / len(fx_rates) if fx_rates else 1.16
+    for sym, sym_trades in by_sym.items():
+        pl_eur = synthese_realise.get(sym)
+        if pl_eur is None: continue
+        # Mettre le P/L EUR sur le dernier trade de fermeture/expiration
+        close_trades = [t for t in sym_trades if t['statut'] in ('Expirée','Fermée','Assignée','Clôturée')]
+        if close_trades:
+            close_trades[-1]['pl_realise'] = pl_eur
+        # Les trades ouverts : non-réalisé
+        open_trades = [t for t in sym_trades if t['statut'] == 'Ouverte']
+        if open_trades:
+            open_trades[0]['pl_nonrealise'] = synthese_nonrealise.get(sym, 0.0)
 
     return {
-        'year':      year,
-        'trades':    trades,
-        'positions': positions_ouvertes,
-        'actif_net': actif_net,
-        'frais':     frais_total,
-        'fx':        fx_avg,
-        'depots':    depots,       # dépôts de cette année
+        'year':               year,
+        'trades':             trades,
+        'positions':          positions_ouvertes,
+        'actif_net':          actif_net,
+        'frais':              frais_total,
+        'fx':                 sum(fx_rates) / len(fx_rates) if fx_rates else 1.16,
+        'depots':             depots,
+        'synthese_realise':   synthese_realise,
+        'synthese_profit_ct': synthese_profit_ct,
+        'synthese_perte_ct':  synthese_perte_ct,
+        'synthese_nonrealise':synthese_nonrealise,
+        'cours_sous_jacents': cours_sous_jacents,
     }
-
-
 def get_trade_statut_final(sym, all_trades):
     """Détermine le statut final d'une option à partir de tous ses trades."""
     sym_trades = [t for t in all_trades if t['symbole'] == sym]
     codes = ' '.join(t.get('code','') for t in sym_trades)
     if 'Ep' in codes: return 'Expirée'
-    # Si la quantité nette est 0 → clôturée/roulée
     net_qty = sum(t['quantite'] for t in sym_trades)
     if abs(net_qty) < 0.01:
-        # Si P/L négatif sur une clôture → roulée
         close_trades = [t for t in sym_trades if t['quantite'] > 0 and 'Ep' not in t.get('code','')]
         if close_trades: return 'Roulée'
         return 'Fermée'
     return 'Ouverte'
+
+
+def get_type_trade(sym, all_trades):
+    """Retourne le type du trade d'ouverture (Vente Put / Vente Call / etc.)."""
+    sym_trades = [t for t in all_trades if t['symbole'] == sym]
+    # Trade d'ouverture = qty < 0
+    open_trade = next((t for t in sym_trades if t['quantite'] < 0), None)
+    if open_trade:
+        return open_trade.get('type_trade', '')
+    # Fallback depuis le symbole
+    sp = sym.split()
+    cp = sp[-1] if sp else ''
+    label = 'Put' if cp == 'P' else 'Call'
+    return f"Vente {label}"
 
 
 # ── Dossier de stockage persistant des CSV IBKR ──
@@ -966,7 +1085,7 @@ IBKR_DIR = Path(__file__).parent / "ibkr_data"
 IBKR_DIR.mkdir(exist_ok=True)
 
 # Version du cache — à incrémenter si parse_ibkr_csv change
-_PARSE_VERSION = "v3"
+_PARSE_VERSION = "v6"
 
 @st.cache_data(show_spinner=False)
 def parse_ibkr_cached(file_bytes, _version=_PARSE_VERSION):
@@ -986,40 +1105,45 @@ def load_all_ibkr():
     return data
 
 def compute_ibkr_kpis(ibkr_data):
-    """Calcule tous les KPIs globaux depuis l'ensemble des CSV chargés."""
+    """Calcule tous les KPIs globaux depuis l ensemble des CSV chargés.
+    Toutes les valeurs sont en EUR (les CSV IBKR sont déjà en EUR via Synthèse)."""
     all_trades = []
     for yr_data in ibkr_data.values():
         all_trades.extend(yr_data.get('trades', []))
 
-    # Capital investi = somme de tous les dépôts individuels EUR
+    # Capital investi = somme de tous les dépôts EUR
     capital_investi = sum(d.get('depots', 0.0) for d in ibkr_data.values())
 
-    # Primes nettes (logique sheet) = sum(produit + frais) sur toutes les jambes
-    # C'est ce que tu encaisses/paies réellement en cash à chaque ordre
-    primes_nettes = sum(
-        t['produit'] + t['frais']
-        for t in all_trades
+    # Primes nettes EUR = P&L réalisé net (gains - pertes)
+    primes_nettes_eur = sum(t['pl_realise'] for t in all_trades)
+
+    # Primes brutes USD = Profit C/T EUR × taux EUR/USD historique moyen (~1.075)
+    # Logique identique au Google Sheet : sum(profit_ct) × taux_moyen
+    profit_ct_eur = sum(
+        v for d in ibkr_data.values()
+        for v in d.get('synthese_profit_ct', {}).values()
     )
+    fx_historique = 1.075  # taux EUR/USD moyen historique (2023-2026)
+    primes_brutes_usd = profit_ct_eur * fx_historique
+    primes_brutes_eur = profit_ct_eur  # valeur EUR brute (avant conversion)
 
-    # P/L net IBKR = sum des pl_realise (assignations = 0 chez IBKR)
-    pl_net_ibkr = sum(t['pl_realise'] for t in all_trades)
+    # Capital actuel = capital investi + primes nettes
+    capital_actuel = capital_investi + primes_nettes_eur
 
-    # Taux FX moyen pondéré sur tous les CSV
+    # ROI = primes nettes / capital investi
+    roi = (primes_nettes_eur / capital_investi * 100) if capital_investi > 0 else 0.0
+
+    # Taux FX moyen
     fx_rates = [d.get('fx', 1.16) for d in ibkr_data.values() if 0.8 <= d.get('fx', 0) <= 1.8]
     fx = sum(fx_rates) / len(fx_rates) if fx_rates else 1.16
 
-    # Capital actuel = capital investi + primes nettes converties en EUR
-    capital_actuel = capital_investi + (primes_nettes / fx)
-
-    # ROI = primes nettes / capital investi
-    roi = (primes_nettes / fx / capital_investi * 100) if capital_investi > 0 else 0.0
-
     return {
-        'capital_investi':  capital_investi,   # €
-        'primes_nettes':    primes_nettes,      # $ (logique sheet)
-        'pl_net_ibkr':      pl_net_ibkr,        # $ (comptable IBKR)
-        'capital_actuel':   capital_actuel,     # €
-        'roi':              roi,                # %
+        'capital_investi':  capital_investi,
+        'primes_nettes_eur':primes_nettes_eur,
+        'primes_brutes_eur':primes_brutes_eur,  # EUR brut Profit C/T
+        'primes_brutes_usd':primes_brutes_usd,  # USD ≈ valeur Google Sheet
+        'capital_actuel':   capital_actuel,
+        'roi':              roi,
         'fx':               fx,
     }
 
@@ -1029,6 +1153,14 @@ if ('ibkr_data' not in st.session_state or
         st.session_state.get('ibkr_parse_version') != _PARSE_VERSION):
     st.session_state['ibkr_data'] = load_all_ibkr()
     st.session_state['ibkr_parse_version'] = _PARSE_VERSION
+    # Invalider le cache des cours live pour forcer un refresh au prochain render
+    st.session_state.pop('options_auto_refreshed', None)
+
+# ── Auto-refresh cours live au premier chargement de la session ──
+if not st.session_state.get('options_auto_refreshed', False) and YF_AVAILABLE:
+    if st.session_state.get('ibkr_data'):
+        refresh_options_cours()
+        st.session_state['options_auto_refreshed'] = True
 
 # ── Capital réel persistant (saisie manuelle) ──
 _CAPITAL_REEL_FILE = Path(__file__).parent / "ibkr_data" / "capital_reel.json"
@@ -1160,12 +1292,21 @@ with tab4:
             pl_net      = sum(t['pl_realise'] for t in sym_trades)
             prime_nette = sum(t['produit'] for t in sym_trades)
             frais_tot   = sum(abs(t['frais']) for t in sym_trades)
+            type_tr = open_trade.get('type_trade', '')
+            if not type_tr:
+                cp = open_trade.get('call_put','')
+                lbl = 'Put' if cp == 'P' else 'Call'
+                type_tr = f"Vente {lbl}"
+            # Nb contrats = valeur absolue de la quantité du trade d'ouverture
+            nb_contrats = int(abs(open_trade.get('quantite', 1)))
             options_consolidated.append({
                 'symbole': sym, 'ticker': open_trade['ticker'],
                 'call_put': open_trade['call_put'], 'strike': open_trade['strike'],
                 'expiration': open_trade['expiration'], 'date': open_trade['date'],
                 'prime_nette': prime_nette, 'frais': frais_tot,
-                'pl_net': pl_net, 'statut': statut_final, 'annee': open_trade['annee']
+                'pl_net': pl_net, 'statut': statut_final,
+                'type_trade': type_tr, 'nb_contrats': nb_contrats,
+                'annee': open_trade['annee']
             })
 
         # ── Filtre années multi-sélection ──
@@ -1221,6 +1362,18 @@ with tab4:
         opts_open    = [o for o in opts_filtered if o['statut'] == 'Ouverte']
         opts_closed  = [o for o in opts_filtered if o['statut'] != 'Ouverte']
 
+        # ── Cours des sous-jacents : live (yfinance) avec fallback CSV ──
+        _cours_actions = {}
+        # D'abord les cours CSV (base)
+        for _yr_d in st.session_state['ibkr_data'].values():
+            for _tk, _c in _yr_d.get('cours_sous_jacents', {}).items():
+                if _c > 0:
+                    _cours_actions[_tk] = _c
+        # Puis écrase avec les cours live si disponibles
+        _live = st.session_state.get('options_cours_live', {})
+        _cours_actions.update(_live)
+        _last_opt_refresh = st.session_state.get('options_cours_last_refresh', None)
+
         # ── Taux EUR/USD : moyenne des taux valides sur années sélectionnées ──
         _fx_vals = [d.get('fx', 0) for d in _fx_data if 0.8 <= d.get('fx', 0) <= 1.8]
         _fx = sum(_fx_vals) / len(_fx_vals) if _fx_vals else 1.16
@@ -1232,68 +1385,93 @@ with tab4:
             {y: st.session_state['ibkr_data'][y] for y in active_years
              if y in st.session_state['ibkr_data']}
         )
-        _primes_n_f = _ibkr_kpis_filtered['primes_nettes']
-        _pl_ibkr_f  = _ibkr_kpis_filtered['pl_net_ibkr']
+        _primes_n_f = _ibkr_kpis_filtered['primes_nettes_eur']
         _roi_f      = _ibkr_kpis_filtered['roi']
+        _fx_f       = _ibkr_kpis_filtered.get('fx', 1.16)
+
+        # KPI col4/col5 : toujours sur ALL (indépendant du filtre)
+        _roi_all    = _ibkr_kpis_all['roi']
+        _primes_all = _ibkr_kpis_all['primes_nettes_eur']
+        _fx_all     = _ibkr_kpis_all.get('fx', 1.16)
 
         with _kpi_col4:
             st.markdown(card("ROI TOTAL",
-                             f"{_roi_f:+.2f} %",
-                             f"primes nettes / investi",
-                             pcol(_roi_f), "🏆"), unsafe_allow_html=True)
+                             f"{_roi_all:+.2f} %",
+                             f"toutes années confondues",
+                             pcol(_roi_all), "🏆"), unsafe_allow_html=True)
 
         with _kpi_col5:
             st.markdown(
                 f"""<div style='background:{C['card']};border-radius:12px;padding:14px 16px;
 border:1px solid {C['gold']}44'>
 <div style='font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px'>
-💰 PRIMES ENCAISSÉES</div>
-<div style='font-size:18px;font-weight:700;color:{C['gold']};font-family:Space Grotesk'>
-${_primes_n_f:.2f}</div>
-<div style='font-size:11px;color:{C['muted']};margin-top:2px'>{_primes_n_f/_fx:.2f} € · logique sheet</div>
-<div style='border-top:1px solid {C['border']};margin:8px 0'></div>
-<div style='font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px'>
-💹 P/L NET IBKR</div>
-<div style='font-size:16px;font-weight:700;color:{pcol(_pl_ibkr_f)};font-family:Space Grotesk'>
-${_pl_ibkr_f:+.2f}</div>
-<div style='font-size:11px;color:{C['muted']};margin-top:2px'>{_pl_ibkr_f/_fx:+.2f} € · comptable IBKR</div>
+💰 PRIMES BRUTES ENCAISSÉES</div>
+<div style='font-size:22px;font-weight:700;color:{C['gold']};font-family:Space Grotesk'>
+{_ibkr_kpis_all['primes_brutes_eur']:+.2f} €</div>
+<div style='font-size:11px;color:{C['muted']};margin-top:2px'>≈ ${_ibkr_kpis_all.get('primes_brutes_usd', _ibkr_kpis_all['primes_brutes_eur']*1.075):.2f} · Profit C/T (logique Sheet)</div>
+<div style='border-top:1px solid {C['border']};margin:6px 0 4px'></div>
+<div style='font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.06em'>P&L NET réalisé (gains − pertes)</div>
+<div style='font-size:16px;font-weight:700;color:{pcol(_primes_all)};font-family:Space Grotesk'>
+{_primes_all:+.2f} €<span style='font-size:10px;font-weight:400;color:{C['muted']}'> ≈ ${_primes_all*_fx_all:.2f}</span></div>
 </div>""", unsafe_allow_html=True)
 
-        def _cell(usd, col, bold=False):
-            """Cellule avec $X.XX en haut et équivalent €X.XX en dessous."""
+        def _cell(eur, col, bold=False):
+            """Cellule avec X.XX€ en grand et $X.XX en petit (CSV en EUR)."""
             fw = "font-weight:700;" if bold else ""
-            # Gestion du signe indépendamment pour $ et €
-            abs_usd = abs(usd); abs_eur = abs(_eur(usd))
-            sign = "+" if usd > 0 else ("-" if usd < 0 else "")
+            abs_eur = abs(eur); abs_usd = abs(eur * _fx)
+            sign = "+" if eur > 0 else ("-" if eur < 0 else "")
             return (f"<td style='padding:6px 10px;text-align:right'>"
-                    f"<span style='color:{col};{fw}font-size:12px'>{sign}${abs_usd:.2f}</span><br>"
-                    f"<span style='color:{col};font-size:10px;opacity:.8'>{sign}{abs_eur:.2f}€</span>"
+                    f"<span style='color:{col};{fw}font-size:12px'>{sign}{abs_eur:.2f} €</span><br>"
+                    f"<span style='color:{col};font-size:10px;opacity:.7'>{sign}${abs_usd:.2f}</span>"
                     f"</td>")
 
-        def _cell_frais(usd):
-            abs_usd = abs(usd); abs_eur = abs(_eur(usd))
+        def _cell_frais(eur):
+            abs_eur = abs(eur); abs_usd = abs(eur * _fx)
             return (f"<td style='padding:6px 10px;text-align:right'>"
-                    f"<span style='color:{C['red']};font-size:12px'>-${abs_usd:.2f}</span><br>"
-                    f"<span style='color:{C['red']};font-size:10px;opacity:.8'>-{abs_eur:.2f}€</span>"
-                    f"</td>")
+                    f"<span style='color:{C['red']};font-size:12px'>-{abs_eur:.2f} €</span><br>"
+                    f"<span style='color:{C['red']};font-size:10px;opacity:.7'>-${abs_usd:.2f}</span></td>")
 
         # ── KPIs trades ──
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         _total_pl      = sum(o['pl_net'] for o in opts_filtered if o['statut'] != 'Ouverte')
-        _total_frais   = sum(o['frais'] for o in opts_filtered)
+        _total_frais   = sum(o['frais'] for o in opts_filtered if o['statut'] != 'Ouverte')
         _nb_total      = len([o for o in opts_filtered if o['statut'] != 'Ouverte'])
         _nb_exp        = len([o for o in opts_filtered if o['statut'] == 'Expirée'])
         _nb_ass        = len([o for o in opts_filtered if o['statut'] in ('Assignée','Fermée','Roulée')])
         _win_rate      = (_nb_exp / _nb_total * 100) if _nb_total > 0 else 0
         _pl_moy        = _total_pl / max(_nb_total, 1)
 
-        _k1,_k2,_k3,_k4,_k5 = st.columns(5)
+        # ROI sur les années filtrées = primes filtrées / capital investi total
+        _cap_inv_f = _ibkr_kpis_filtered['capital_investi'] or _cap_inv or 1
+        _roi_trades = (_total_pl / _cap_inv_f * 100) if _cap_inv_f > 0 else 0
+
+        _k1,_k2,_k3,_k4,_k5,_k6 = st.columns(6)
         with _k1: st.markdown(card("TRADES CLÔTURÉS", str(_nb_total), f"{len(opts_open)} ouvert(s)", C['purple'],"⚙️"), unsafe_allow_html=True)
         with _k2: st.markdown(card("WIN RATE", f"{_win_rate:.0f}%", f"{_nb_exp} expirées / {_nb_ass} roulées/fermées", C['green'] if _win_rate >= 70 else C['gold'],"✅"), unsafe_allow_html=True)
-        with _k3: st.markdown(card("PRIME OBTENUE", f"${_total_pl:.2f}", f"{_eur(_total_pl):.2f} €", pcol(_total_pl),"💰"), unsafe_allow_html=True)
-        with _k4: st.markdown(card("FRAIS TOTAUX", f"-${_total_frais:.2f}", f"-{_eur(_total_frais):.2f} €", C['red'],"📋"), unsafe_allow_html=True)
-        with _k5: st.markdown(card("NET (P/L−frais)", f"${_total_pl - _total_frais:.2f}", f"{_eur(_total_pl - _total_frais):.2f} €", pcol(_total_pl - _total_frais),"💹"), unsafe_allow_html=True)
+        with _k3: st.markdown(card("PRIME OBTENUE", f"{_total_pl:+.2f} €", f"≈ ${_total_pl*_fx:+.2f}", pcol(_total_pl),"💰"), unsafe_allow_html=True)
+        with _k4: st.markdown(card("FRAIS TOTAUX", f"-{_total_frais:.2f} €", f"≈ -${_total_frais*_fx:.2f}", C['red'],"📋"), unsafe_allow_html=True)
+        with _k5: st.markdown(card("NET (P/L−frais)", f"{(_total_pl - _total_frais):+.2f} €", f"≈ ${(_total_pl - _total_frais)*_fx:+.2f}", pcol(_total_pl - _total_frais),"💹"), unsafe_allow_html=True)
+        with _k6: st.markdown(card("ROI (période)", f"{_roi_trades:+.2f} %", f"primes / capital investi", pcol(_roi_trades),"📈"), unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Indicateur cours live + bouton refresh options ──
+        _opt_refresh_cols = st.columns([3, 1])
+        with _opt_refresh_cols[0]:
+            if _last_opt_refresh:
+                st.markdown(
+                    f"<div style='font-size:11px;color:{C['muted']};padding:4px 0'>"
+                    f"📡 Cours live MAJ à <b style='color:{C['green']}'>{_last_opt_refresh}</b></div>",
+                    unsafe_allow_html=True)
+            else:
+                st.markdown(
+                    f"<div style='font-size:11px;color:{C['gold']};padding:4px 0'>"
+                    f"⏳ Récupération des cours en cours...</div>",
+                    unsafe_allow_html=True)
+        with _opt_refresh_cols[1]:
+            if st.button("📡 Cours live", key="opt_refresh_btn", use_container_width=True,
+                         help="Récupère les cours en temps réel via Yahoo Finance"):
+                refresh_options_cours()
+                st.rerun()
 
         # ── Helpers date et tri ──
         from datetime import datetime
@@ -1336,6 +1514,7 @@ ${_pl_ibkr_f:+.2f}</div>
         # ── Helpers en-têtes tableaux ──
         _TH  = lambda t,w: f"<th style='padding:7px 10px;text-align:right;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']};width:{w}'>{t}</th>"
         _THL = lambda t,w: f"<th style='padding:7px 10px;text-align:left;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']};width:{w}'>{t}</th>"
+        _THC = lambda t,w: f"<th style='padding:7px 10px;text-align:center;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']};width:{w}'>{t}</th>"
 
         # ── Tableau positions ouvertes ──
         if opts_open:
@@ -1367,7 +1546,7 @@ ${_pl_ibkr_f:+.2f}</div>
 
             tbl_o = f"<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:12px'>"
             tbl_o += "<thead><tr style='background:#0A1A0D'>"
-            tbl_o += _THL("Symbole","26%") + _THL("Ticker","8%") + _THL("C/P","5%") + _THL("Strike","7%") + _THL("Expiration","9%") + _THL("Ouverture","9%") + _TH("Prime encaissée","18%") + _TH("Frais","13%")
+            tbl_o += _THL("Symbole","16%") + _THL("Ticker","5%") + _THL("Type","8%") + _THC("Qté","4%") + _THL("C/P","3%") + _THL("Strike","5%") + _THL("Ouverture","6%") + _THL("Expiration","6%") + _THC("J. restants","6%") + _THC("Marge","6%") + _TH("Prime enc.","11%") + _TH("Frais","7%")
             tbl_o += "</tr></thead><tbody>"
             _tot_o_prime = _tot_o_frais = _tot_o_pl = 0.0
             for o in _open_sorted:
@@ -1376,12 +1555,52 @@ ${_pl_ibkr_f:+.2f}</div>
                 _pn_col  = C['green'] if o['prime_nette'] >= 0 else C['red']
                 _tot_o_prime += o['prime_nette']; _tot_o_frais += o['frais']; _tot_o_pl += o['pl_net']
                 tbl_o += f"<tr style='border-bottom:1px solid {C['border']}22'>"
+                _tt = o.get('type_trade','')
+                _tt_col = "#9945FF" if 'Put' in _tt else "#627EEA"
                 tbl_o += f"<td style='padding:7px 10px;font-family:monospace;font-size:11px;color:{C['cyan']}'>{o['symbole']}</td>"
                 tbl_o += f"<td style='padding:7px 10px;font-weight:600;color:{C['text']}'>{o['ticker']}</td>"
+                tbl_o += f"<td style='padding:7px 10px'><span style='background:{_tt_col}22;color:{_tt_col};border-radius:6px;padding:2px 6px;font-size:10px;font-weight:700;white-space:nowrap'>{_tt}</span></td>"
+                tbl_o += f"<td style='padding:7px 10px;text-align:center;font-weight:700;color:{C['text']}'>{o.get('nb_contrats',1)}</td>"
                 tbl_o += f"<td style='padding:7px 10px;font-weight:700;color:{_cp_col}'>{o['call_put']}</td>"
                 tbl_o += f"<td style='padding:7px 10px;color:{C['text']}'>${o['strike']}</td>"
-                tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_exp(o['expiration'])}</td>"
                 tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_date(o['date'])}</td>"
+                tbl_o += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_exp(o['expiration'])}</td>"
+                # Nb jours restants avant expiration
+                try:
+                    _exp_dt = _parse_exp(o['expiration'])
+                    _today_dt = datetime.now()
+                    _jours = (_exp_dt - _today_dt).days
+                    if _jours < 0:
+                        _j_txt = "Expiré"; _j_col = C['red']
+                    elif _jours <= 7:
+                        _j_txt = str(_jours); _j_col = C['red']
+                    elif _jours <= 21:
+                        _j_txt = str(_jours); _j_col = C['gold']
+                    else:
+                        _j_txt = str(_jours); _j_col = C['green']
+                except:
+                    _j_txt = "—"; _j_col = C['muted']
+                tbl_o += f"<td style='padding:7px 10px;text-align:center;font-weight:700;color:{_j_col}'>{_j_txt}</td>"
+                # ── Marge ITM/OTM ──
+                _strike_str = o.get('strike','').replace('$','')
+                _ticker_o   = o.get('ticker','')
+                _cp_o       = o.get('call_put','')
+                _cours_o    = _cours_actions.get(_ticker_o, 0)
+                try:
+                    _strike_f = float(_strike_str)
+                    if _cours_o > 0 and _strike_f > 0:
+                        if _cp_o == 'P':
+                            _marge_pct = (_cours_o - _strike_f) / _cours_o * 100
+                        else:
+                            _marge_pct = (_strike_f - _cours_o) / _cours_o * 100
+                        _m_col  = C['green'] if _marge_pct >= 0 else C['red']
+                        _m_lbl  = f"{'OTM' if _marge_pct >= 0 else 'ITM'} {_marge_pct:+.1f}%"
+                        _m_cell = f"<td style='padding:6px 8px;text-align:center'><span style='background:{_m_col}22;color:{_m_col};border-radius:6px;padding:2px 5px;font-size:10px;font-weight:700;white-space:nowrap'>{_m_lbl}</span></td>"
+                    else:
+                        _m_cell = f"<td style='padding:7px 10px;text-align:center;color:{C['muted']}'>—</td>"
+                except:
+                    _m_cell = f"<td style='padding:7px 10px;text-align:center;color:{C['muted']}'>—</td>"
+                tbl_o += _m_cell
                 tbl_o += _cell(o['prime_nette'], _pn_col, bold=True)
                 tbl_o += _cell_frais(o['frais'])
                 tbl_o += "</tr>"
@@ -1470,11 +1689,11 @@ ${_pl_ibkr_f:+.2f}</div>
 
             tbl_h = f"<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:12px'>"
             tbl_h += "<thead><tr style='background:#111827'>"
-            tbl_h += (_THL("Symbole","20%") + _THL("Ticker","6%") + _THL("C/P","4%") + _THL("Strike","6%") +
-                      _THL("Expiration","8%") + _THL("Ouverture","8%") +
-                      _TH("Prime encaissée","13%") +
-                      _TH("Frais","8%") +
-                      _TH("Prime obtenue","13%") + _TH("Statut","8%"))
+            tbl_h += (_THL("Symbole","14%") + _THL("Ticker","5%") + _THL("Type","9%") + _THC("Qté","4%") + _THL("C/P","4%") + _THL("Strike","5%") +
+                      _THL("Expiration","6%") + _THL("Ouverture","7%") +
+                      _TH("Prime encaissée","10%") +
+                      _TH("Frais","7%") +
+                      _TH("Prime obtenue","10%") + _TH("Statut","8%"))
             tbl_h += "</tr></thead><tbody>"
             _tot_prime = _tot_frais = _tot_pl = 0.0
             for o in opts_display:
@@ -1484,8 +1703,12 @@ ${_pl_ibkr_f:+.2f}</div>
                 _sc, _sbg = _scol(o['statut'])
                 _tot_prime += o['prime_nette']; _tot_frais += o['frais']; _tot_pl += o['pl_net']
                 tbl_h += f"<tr style='border-bottom:1px solid {C['border']}22'>"
+                _tt = o.get('type_trade','')
+                _tt_col = "#9945FF" if 'Put' in _tt else "#627EEA"
                 tbl_h += f"<td style='padding:7px 10px;font-family:monospace;font-size:11px;color:{C['cyan']}'>{o['symbole']}</td>"
                 tbl_h += f"<td style='padding:7px 10px;font-weight:600;color:{C['text']}'>{o['ticker']}</td>"
+                tbl_h += f"<td style='padding:7px 10px'><span style='background:{_tt_col}22;color:{_tt_col};border-radius:6px;padding:2px 6px;font-size:10px;font-weight:700;white-space:nowrap'>{_tt}</span></td>"
+                tbl_h += f"<td style='padding:7px 10px;text-align:center;font-weight:700;color:{C['text']}'>{o.get('nb_contrats',1)}</td>"
                 tbl_h += f"<td style='padding:7px 10px;font-weight:700;color:{_cp_col}'>{o['call_put']}</td>"
                 tbl_h += f"<td style='padding:7px 10px;color:{C['text']}'>${o['strike']}</td>"
                 tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_exp(o['expiration'])}</td>"
