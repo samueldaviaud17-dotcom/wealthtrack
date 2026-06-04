@@ -1078,6 +1078,28 @@ def parse_ibkr_html(content_bytes):
                 if comm > 0:
                     frais_par_sym[sym] = comm
 
+    # ── Détecter les roulages (fermeture + ouverture le même jour) ─────────
+    # Une option est ROULÉE si elle a été rachetée (code='C') et qu'une nouvelle
+    # option a été ouverte (code contient 'O') le même jour dans ce relevé
+    _ouvertures_par_date = {}  # {date: [sym]}
+    _fermetures_C = {}         # {sym: date_rachat}
+    for t in trades:
+        date = t['date']
+        code = t['code']
+        qty  = t['quantite']
+        sym  = t['symbole']
+        if qty < 0 and 'O' in code:
+            _ouvertures_par_date.setdefault(date, []).append(sym)
+        elif qty > 0 and code.strip() == 'C':
+            _fermetures_C[sym] = date
+
+    # Symboles roulés = rachetés ET remplacés le même jour
+    _syms_roules = set()
+    for sym, date_close in _fermetures_C.items():
+        nouvelles = [s for s in _ouvertures_par_date.get(date_close, []) if s != sym]
+        if nouvelles:
+            _syms_roules.add(sym)
+
     # ── Injecter P/L, frais ET statut définitif depuis Synthèse ──────────
     # La Synthèse est la source de vérité absolue pour le statut :
     #   réal_total ≠ 0  → option clôturée dans ce relevé
@@ -1093,26 +1115,38 @@ def parse_ibkr_html(content_bytes):
         nonreal   = synthese_nonrealise.get(sym, 0.0)
         frais_sym = frais_par_sym.get(sym, 0.0)
 
-        # Statut définitif depuis Synthèse
+        # Statut définitif depuis Synthèse + détection roulages
         if real_pl is not None and real_pl != 0.0:
-            # Option clôturée dans ce relevé : déterminer le type exact
-            # depuis le code du trade de fermeture
-            close_t = next((t for t in sym_trades
-                            if t['statut'] in ('Expirée','Fermée','Assignée','Clôturée')), None)
+            # Option clôturée → déterminer le type exact
+            close_t = next((t for t in sym_trades if t['quantite'] > 0), None)
             if close_t:
-                statut_final = close_t['statut']   # Expirée / Fermée / Assignée
+                code_close = close_t.get('code','')
+                if 'Ep' in code_close:
+                    statut_final = 'Expirée'
+                elif 'A' in code_close:
+                    statut_final = 'Assignée'
+                elif sym in _syms_roules:
+                    statut_final = 'Roulée'
+                elif code_close.strip() == 'C':
+                    statut_final = 'Fermée'
+                else:
+                    statut_final = 'Clôturée'
             else:
-                statut_final = 'Clôturée'
-        elif nonreal != 0.0:
-            statut_final = 'Ouverte'
-        elif real_pl == 0.0 and nonreal == 0.0 and real_pl is not None:
-            # Apparaît dans la synthèse avec tout à 0 → encore ouvert (valeur MTM nulle)
+                # Pas de trade de fermeture dans ce relevé (cross-year)
+                statut_final = 'Expirée' if real_pl >= 0 else 'Fermée'
+        elif nonreal != 0.0 or (real_pl == 0.0 and nonreal == 0.0 and real_pl is not None):
             statut_final = 'Ouverte'
         else:
-            # Pas dans la synthèse du tout → statut depuis codes transaction
-            close_t = next((t for t in sym_trades
-                            if t['statut'] in ('Expirée','Fermée','Assignée','Clôturée')), None)
-            statut_final = close_t['statut'] if close_t else 'Ouverte'
+            # Pas dans la synthèse → code transaction
+            close_t = next((t for t in sym_trades if t['quantite'] > 0), None)
+            if close_t:
+                code_close = close_t.get('code','')
+                if 'Ep' in code_close:    statut_final = 'Expirée'
+                elif 'A'  in code_close:  statut_final = 'Assignée'
+                elif sym in _syms_roules: statut_final = 'Roulée'
+                else:                     statut_final = 'Fermée'
+            else:
+                statut_final = 'Ouverte'
 
         # Mettre à jour tous les trades du symbole
         for t in sym_trades:
