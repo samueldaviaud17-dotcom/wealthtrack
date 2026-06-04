@@ -1806,8 +1806,8 @@ border:1px solid {C['gold']}44'>
 
             if _stat_sel_key not in st.session_state:
                 st.session_state[_stat_sel_key] = {s: True for s in _all_statuts}
-            # Ajouter automatiquement les nouveaux statuts
-            for s in _present_statuts:
+            # Ajouter automatiquement les nouveaux statuts (ex: 'Roulée' apparu après déploiement)
+            for s in _all_statuts + _present_statuts:
                 if s not in st.session_state[_stat_sel_key]:
                     st.session_state[_stat_sel_key][s] = True
 
