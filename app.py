@@ -1569,7 +1569,7 @@ border:1px solid {C['gold']}44'>
         # ── KPIs trades ──
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         _total_pl      = sum(o['pl_net'] for o in opts_filtered if o['statut'] != 'Ouverte')
-        _total_frais   = sum(o['frais'] for o in opts_filtered if o['statut'] != 'Ouverte')
+        _total_frais   = sum(o['frais'] for o in opts_filtered)  # tous statuts : frais payés dès l'ouverture
         _nb_total      = len([o for o in opts_filtered if o['statut'] != 'Ouverte'])
         _nb_exp        = len([o for o in opts_filtered if o['statut'] == 'Expirée'])
         _nb_ass        = len([o for o in opts_filtered if o['statut'] in ('Assignée','Fermée','Roulée')])
