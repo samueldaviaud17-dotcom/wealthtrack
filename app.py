@@ -933,6 +933,7 @@ def parse_ibkr_html(content_bytes):
     synthese_realise   = {}   # {sym: total réalisé €}
     synthese_profit_ct = {}   # {sym: profit CT €}
     synthese_perte_ct  = {}   # {sym: perte CT €}
+    synthese_prime_enc = {}   # {sym: prime encaissée EUR (Profit ou Perte C/T selon signe)}
     synthese_nonrealise= {}   # {sym: non-réalisé total €}
     cours_sous_jacents = {}   # {ticker: cours €}
 
@@ -986,16 +987,19 @@ def parse_ibkr_html(content_bytes):
             n = len(row)
             if n < 7: continue
             # Positions stables dans TOUS les formats IBKR :
-            profit_ct  = sf(row[2])   # toujours col[2] = Profit C/T réalisé
-            perte_ct   = sf(row[3])   # toujours col[3] = Perte C/T réalisé
-            total_real = sf(row[6])   # toujours col[6] = Total Réalisé
-            # Non-Réalisé Total = avant-dernier (avant Code) = col[-2]
-            # → col[11] en 2025 (14 cols), col[13] en 2026 (16 cols), etc.
+            profit_ct  = sf(row[2])   # col[2] = Profit C/T réalisé
+            perte_ct   = sf(row[3])   # col[3] = Perte C/T réalisé
+            total_real = sf(row[6])   # col[6] = Total Réalisé
             nonreal    = sf(row[-2]) if n >= 9 else 0.0
-            synthese_realise[sym]    = total_real
-            synthese_profit_ct[sym]  = profit_ct
-            synthese_perte_ct[sym]   = perte_ct
-            synthese_nonrealise[sym] = nonreal
+            # Prime encaissée EUR par symbole = valeur non-nulle (Profit ou Perte C/T)
+            # Positif = trades gagnants (prime > coût rachat)
+            # Négatif = trades perdants/roulés (coût rachat > prime reçue)
+            prime_enc_eur = profit_ct if profit_ct != 0.0 else perte_ct
+            synthese_realise[sym]      = total_real
+            synthese_profit_ct[sym]    = profit_ct
+            synthese_perte_ct[sym]     = perte_ct
+            synthese_nonrealise[sym]   = nonreal
+            synthese_prime_enc[sym]    = prime_enc_eur
 
     # ── Cours sous-jacents depuis synthèse évaluée ──────
     # Table avec "Quantité|Prix|Pertes et profits"
@@ -1179,10 +1183,13 @@ def parse_ibkr_html(content_bytes):
             else:
                 statut_final = 'Ouverte'
 
+        # Prime encaissée EUR depuis Synthèse (Profit ou Perte C/T selon signe)
+        prime_enc_sym = synthese_prime_enc.get(sym, 0.0)
         # Mettre à jour tous les trades du symbole
         for t in sym_trades:
-            t['statut']  = statut_final
-            t['frais']   = frais_sym
+            t['statut']        = statut_final
+            t['frais']         = frais_sym
+            t['prime_enc_eur'] = prime_enc_sym
 
         # P/L sur le dernier trade de fermeture (tous statuts clôturés)
         if real_pl is not None:
@@ -1243,6 +1250,7 @@ def parse_ibkr_html(content_bytes):
         'depots':             depots,
         'synthese_realise':   synthese_realise,
         'synthese_profit_ct': synthese_profit_ct,
+        'synthese_prime_enc': synthese_prime_enc,
         'synthese_perte_ct':  synthese_perte_ct,
         'synthese_nonrealise':synthese_nonrealise,
         'cours_sous_jacents': cours_sous_jacents,
@@ -1486,7 +1494,10 @@ with tab4:
             pl_net      = sum(t['pl_realise'] for t in sym_trades)
             # Prime encaissée = produit du trade d'OUVERTURE uniquement (vente initiale)
             # Ne pas inclure le rachat (négatif) pour les roulées/fermées
-            prime_nette = sum(abs(t['produit']) for t in sym_trades if t['quantite'] < 0)
+            prime_nette  = open_trade.get('prime_enc_eur', 0.0)
+            # Fallback : si pas encore injecté, utiliser produit USD de l'ouverture
+            if prime_nette == 0.0:
+                prime_nette = sum(abs(t['produit']) for t in sym_trades if t['quantite'] < 0)
             # Frais = déjà injectés depuis Synthèse évaluée (même valeur sur tous les trades)
             frais_tot   = open_trade.get('frais', 0.0)
             type_tr = open_trade.get('type_trade', '')
