@@ -1094,6 +1094,14 @@ def parse_ibkr_html(content_bytes):
                 if comm > 0:
                     frais_par_sym[sym] = comm
 
+    # ── Détecter les assignations (code 'A') absentes de la Synthèse ───────
+    # IBKR ne met pas les assignées dans la Synthèse Options
+    # → on les détecte via le code 'A' dans les transactions
+    for t in trades:
+        sym = t['symbole']
+        if 'A' in t.get('code','') and sym not in synthese_realise:
+            synthese_realise[sym] = 0.0   # P/L option = 0 (prime → livraison d'actions)
+
     # ── Détecter les roulages (fermeture + ouverture le même jour) ─────────
     # Une option est ROULÉE si elle a été rachetée (code='C') et qu'une nouvelle
     # option a été ouverte (code contient 'O') le même jour dans ce relevé
@@ -1128,11 +1136,18 @@ def parse_ibkr_html(content_bytes):
 
     for sym, sym_trades in by_sym.items():
         real_pl   = synthese_realise.get(sym)
-        nonreal   = synthese_nonrealise.get(sym, 0.0)
+        nonreal   = synthese_nonrealise.get(sym)   # None si absent (≠ 0.0)
         frais_sym = frais_par_sym.get(sym, 0.0)
 
+        # Pré-détection des assignées via code 'A' dans transactions
+        # IBKR ne les met pas dans la Synthèse Options → pl_option=0 par convention
+        _has_assignment = any('A' in t.get('code','') for t in sym_trades)
+
         # Statut définitif depuis Synthèse + détection roulages
-        if real_pl is not None and real_pl != 0.0:
+        if _has_assignment and real_pl is not None and real_pl == 0.0 and nonreal is None:
+            # Option assignée : exercée, prime convertie en position action
+            statut_final = 'Assignée'
+        elif real_pl is not None and real_pl != 0.0:
             # Option clôturée → déterminer le type exact
             close_t = next((t for t in sym_trades if t['quantite'] > 0), None)
             if close_t:
@@ -1169,12 +1184,12 @@ def parse_ibkr_html(content_bytes):
             t['statut']  = statut_final
             t['frais']   = frais_sym
 
-        # P/L sur le dernier trade de fermeture
+        # P/L sur le dernier trade de fermeture (tous statuts clôturés)
         if real_pl is not None:
             close_trades = [t for t in sym_trades
-                            if t['statut'] in ('Expirée','Fermée','Assignée','Clôturée')]
+                            if t['statut'] in ('Expirée','Fermée','Assignée','Clôturée','Roulée')]
             if close_trades:
-                close_trades[-1]['pl_realise'] = real_pl  # total frais pour ce symbole sur dernier trade
+                close_trades[-1]['pl_realise'] = real_pl
 
     # ── Positions ouvertes ───────────────────────────────
     tbl_pos, rows_pos = find_table(['Symbole','Quantité','Mult','Coût'])
@@ -1469,7 +1484,9 @@ with tab4:
             # → utiliser directement le statut du trade le plus récent
             statut_final = sym_trades[-1]['statut'] if sym_trades else 'Ouverte'
             pl_net      = sum(t['pl_realise'] for t in sym_trades)
-            prime_nette = sum(t['produit']    for t in sym_trades)
+            # Prime encaissée = produit du trade d'OUVERTURE uniquement (vente initiale)
+            # Ne pas inclure le rachat (négatif) pour les roulées/fermées
+            prime_nette = sum(abs(t['produit']) for t in sym_trades if t['quantite'] < 0)
             # Frais = déjà injectés depuis Synthèse évaluée (même valeur sur tous les trades)
             frais_tot   = open_trade.get('frais', 0.0)
             type_tr = open_trade.get('type_trade', '')
