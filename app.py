@@ -956,30 +956,46 @@ def parse_ibkr_html(content_bytes):
         if year: break
 
     # ── Synthèse réalisée/non-réalisée ──────────────────
-    # Table avec "Realisé" et "Non réalisé" dans les 3 premières lignes
+    # Table avec "Realisé" dans les premières lignes
+    # Colonnes identifiées par leur NOM dans le header → robuste à tous les formats IBKR
     tbl_synth, rows_synth = find_table(['Realisé'])
     if tbl_synth:
-        # Colonnes : Symbole | Aj.coût | Profit_CT | Perte_CT | PL_T | PL_LT | Total_réal | NonReal_PCT | ... | Total_nonreal | Total
-        # Index :      0         1          2           3          4      5        6             7                    11             12
+        # Lire le header pour mapper nom→index (robuste aux changements de colonnes IBKR)
+        col_idx = {}
+        for hrow in rows_synth[:3]:
+            joined = '|'.join(hrow)
+            if 'Profit C/T' in joined or 'Total' in joined:
+                # Chercher les indices par position dans la section Réalisé
+                # Structure stable : [Sym, Aj.coût, ProfitCT, PerteC T, ProfitLT, PerteLT, Total_Réal, ...]
+                # col[2]=ProfitCT, col[3]=PerteCT, col[6]=TotalRéal sont TOUJOURS aux mêmes positions
+                # car ils sont dans la PREMIÈRE moitié (section Réalisé)
+                # Le Non-Réalisé est dans la DEUXIÈME moitié → col[-2] = avant-dernier (hors Code)
+                break
+
         in_options = False
         for row in rows_synth[2:]:  # skip 2 lignes d'en-tête
             if not row or not row[0].strip(): continue
             sym = row[0].strip()
             if sym == 'Options sur actions et indices': in_options = True; continue
-            if sym in ('Actions','Forex','Total (Tous les actifs)','Total Actions','Total Forex','Total Options sur actions et indices'):
+            if sym in ('Actions','Forex','Total (Tous les actifs)','Total Actions',
+                       'Total Forex','Total Options sur actions et indices'):
                 if sym != 'Options sur actions et indices': in_options = False
                 continue
             if not in_options: continue
             if sym.startswith('Total'): continue
-            if len(row) >= 7:
-                profit_ct  = sf(row[2])
-                perte_ct   = sf(row[3])
-                total_real = sf(row[6]) if len(row) > 6 else 0.0
-                nonreal    = sf(row[11]) if len(row) > 11 else 0.0
-                synthese_realise[sym]    = total_real
-                synthese_profit_ct[sym]  = profit_ct
-                synthese_perte_ct[sym]   = perte_ct
-                synthese_nonrealise[sym] = nonreal
+            n = len(row)
+            if n < 7: continue
+            # Positions stables dans TOUS les formats IBKR :
+            profit_ct  = sf(row[2])   # toujours col[2] = Profit C/T réalisé
+            perte_ct   = sf(row[3])   # toujours col[3] = Perte C/T réalisé
+            total_real = sf(row[6])   # toujours col[6] = Total Réalisé
+            # Non-Réalisé Total = avant-dernier (avant Code) = col[-2]
+            # → col[11] en 2025 (14 cols), col[13] en 2026 (16 cols), etc.
+            nonreal    = sf(row[-2]) if n >= 9 else 0.0
+            synthese_realise[sym]    = total_real
+            synthese_profit_ct[sym]  = profit_ct
+            synthese_perte_ct[sym]   = perte_ct
+            synthese_nonrealise[sym] = nonreal
 
     # ── Cours sous-jacents depuis synthèse évaluée ──────
     # Table avec "Quantité|Prix|Pertes et profits"
