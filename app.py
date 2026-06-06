@@ -1098,14 +1098,6 @@ def parse_ibkr_html(content_bytes):
                 if comm > 0:
                     frais_par_sym[sym] = comm
 
-    # ── Détecter les assignations (code 'A') absentes de la Synthèse ───────
-    # IBKR ne met pas les assignées dans la Synthèse Options
-    # → on les détecte via le code 'A' dans les transactions
-    for t in trades:
-        sym = t['symbole']
-        if 'A' in t.get('code','') and sym not in synthese_realise:
-            synthese_realise[sym] = 0.0   # P/L option = 0 (prime → livraison d'actions)
-
     # ── Détecter les roulages (fermeture + ouverture le même jour) ─────────
     # Une option est ROULÉE si elle a été rachetée (code='C') et qu'une nouvelle
     # option a été ouverte (code contient 'O') le même jour dans ce relevé
@@ -1148,8 +1140,8 @@ def parse_ibkr_html(content_bytes):
         _has_assignment = any('A' in t.get('code','') for t in sym_trades)
 
         # Statut définitif depuis Synthèse + détection roulages
-        if _has_assignment and real_pl is not None and real_pl == 0.0 and nonreal is None:
-            # Option assignée : exercée, prime convertie en position action
+        # Assignées : code 'A' présent ET pas dans Synthèse Options (real_pl=None)
+        if _has_assignment and real_pl is None:
             statut_final = 'Assignée'
         elif real_pl is not None and real_pl != 0.0:
             # Option clôturée → déterminer le type exact
@@ -1251,6 +1243,7 @@ def parse_ibkr_html(content_bytes):
         'synthese_realise':   synthese_realise,
         'synthese_profit_ct': synthese_profit_ct,
         'synthese_prime_enc': synthese_prime_enc,
+        'syms_in_synthese':  set(synthese_realise.keys()) | set(synthese_nonrealise.keys()),
         'synthese_perte_ct':  synthese_perte_ct,
         'synthese_nonrealise':synthese_nonrealise,
         'cours_sous_jacents': cours_sous_jacents,
@@ -1484,8 +1477,16 @@ with tab4:
             trades_by_sym[sym].append(t)
 
         # Construire liste consolidée (1 ligne par symbole/option)
+        # Construire l'ensemble des symboles autorisés (présents dans Synthèse)
+        _syms_ok = set()
+        for yr_data in st.session_state['ibkr_data'].values():
+            _syms_ok |= yr_data.get('syms_in_synthese', set())
+
         options_consolidated = []
         for sym, sym_trades in trades_by_sym.items():
+            # Skip les symboles absents de toutes les Synthèses chargées
+            if sym not in _syms_ok:
+                continue
             open_trade  = next((t for t in sym_trades if t['quantite'] < 0), sym_trades[0])
             close_trade = next((t for t in sym_trades if t['quantite'] > 0), None)
             # Statut déjà mis à jour depuis la Synthèse dans parse_ibkr_html
