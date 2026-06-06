@@ -1504,9 +1504,8 @@ with tab4:
             pl_net      = sum(t['pl_realise'] for t in sym_trades)
             # Prime encaissée = produit du trade d'OUVERTURE uniquement (vente initiale)
             # Ne pas inclure le rachat (négatif) pour les roulées/fermées
-            prime_nette  = sum(t.get('produit_eur', 0.0) for t in sym_trades if t['quantite'] < 0)
-            if prime_nette == 0.0:
-                prime_nette = abs(open_trade.get('prime_enc_eur', 0.0))
+            # Prime brute = produit USD de la vente initiale (exact, cohérent avec Google Sheet)
+            prime_nette  = sum(abs(t['produit']) for t in sym_trades if t['quantite'] < 0)
             # Frais = déjà injectés depuis Synthèse évaluée (même valeur sur tous les trades)
             frais_tot   = open_trade.get('frais', 0.0)
             type_tr = open_trade.get('type_trade', '')
@@ -1645,6 +1644,16 @@ border:1px solid {C['gold']}44'>
             return (f"<td style='padding:6px 10px;text-align:right'>"
                     f"<span style='color:{col};{fw}font-size:12px'>{sign}{abs_eur:.2f} €</span><br>"
                     f"<span style='color:{col};font-size:10px;opacity:.7'>{sign}${abs_usd:.2f}</span>"
+                    f"</td>")
+
+        def _cell_usd(usd, col, bold=False):
+            """Cellule avec $X.XX en grand et X.XX€ en petit (prime brute en USD)."""
+            fw = "font-weight:700;" if bold else ""
+            abs_usd = abs(usd); abs_eur = abs(usd / _fx) if _fx > 0 else 0
+            sign = "+" if usd > 0 else ("-" if usd < 0 else "")
+            return (f"<td style='padding:6px 10px;text-align:right'>"
+                    f"<span style='color:{col};{fw}font-size:12px'>{sign}${abs_usd:.2f}</span><br>"
+                    f"<span style='color:{col};font-size:10px;opacity:.7'>{sign}{abs_eur:.2f} €</span>"
                     f"</td>")
 
         def _cell_frais(eur):
@@ -1828,7 +1837,7 @@ border:1px solid {C['gold']}44'>
                     _j_txt = "—"; _j_col = C['muted']
                 tbl_o += f"<td style='padding:7px 10px;text-align:center;font-weight:700;color:{_j_col}'>{_j_txt}</td>"
                 tbl_o += _m_cell
-                tbl_o += _cell(o['prime_nette'], _pn_col, bold=True)
+                tbl_o += _cell_usd(o['prime_nette'], _pn_col, bold=True)
                 tbl_o += _cell_frais(o['frais'])
                 _po = o['prime_nette'] - o['frais']
                 tbl_o += _cell(_po, C['green'] if _po >= 0 else C['red'], bold=True)
@@ -1839,7 +1848,7 @@ border:1px solid {C['gold']}44'>
             tbl_o += f"<tr style='background:{C['card']};border-top:2px solid {C['border']};font-weight:700'>"
             _tot_o_net = _tot_o_prime - _tot_o_frais
             tbl_o += f"<td colspan='11' style='padding:8px 10px;color:{C['muted']};font-size:11px;text-transform:uppercase;letter-spacing:.05em'>Total</td>"
-            tbl_o += _cell(_tot_o_prime, C['green'] if _tot_o_prime >= 0 else C['red'], bold=True)
+            tbl_o += _cell_usd(_tot_o_prime, C['green'] if _tot_o_prime >= 0 else C['red'], bold=True)
             tbl_o += _cell_frais(_tot_o_frais)
             tbl_o += _cell(_tot_o_net, C['green'] if _tot_o_net >= 0 else C['red'], bold=True)
             tbl_o += "</tr>"
@@ -1922,7 +1931,7 @@ border:1px solid {C['gold']}44'>
             tbl_h += "<thead><tr style='background:#111827'>"
             tbl_h += (_THL("Symbole","14%") + _THL("Ticker","5%") + _THL("Type","9%") + _THC("Qté","4%") + _THL("C/P","4%") + _THL("Strike","5%") +
                       _THL("Expiration","6%") + _THL("Ouverture","7%") +
-                      _TH("Prime encaissée","10%") +
+                      _TH("Prime brute enc.","10%") +
                       _TH("Frais","7%") +
                       _TH("Prime obtenue","10%") + _TH("Statut","8%"))
             tbl_h += "</tr></thead><tbody>"
@@ -1948,7 +1957,7 @@ border:1px solid {C['gold']}44'>
                 if abs(o['prime_nette']) < 0.01 and abs(o['pl_net']) > 0.01:
                     tbl_h += f"<td style='padding:6px 10px;text-align:right;color:{C['muted']}'>—<br><span style='font-size:9px'>cf. relevé préc.</span></td>"
                 else:
-                    tbl_h += _cell(o['prime_nette'], _pn_col, bold=True)
+                    tbl_h += _cell_usd(o['prime_nette'], _pn_col, bold=True)
                 tbl_h += _cell_frais(o['frais'])
                 tbl_h += _cell(o['pl_net'], _pl_col, bold=True)
                 tbl_h += f"<td style='padding:7px 10px;text-align:center'><span style='background:{_sbg};color:{_sc};border-radius:12px;padding:2px 8px;font-size:10px;font-weight:600'>{o['statut']}</span></td>"
@@ -1958,7 +1967,7 @@ border:1px solid {C['gold']}44'>
             _tpl_col = C['green'] if _tot_pl    >= 0 else C['red']
             tbl_h += f"<tr style='background:{C['card']};border-top:2px solid {C['border']};font-weight:700'>"
             tbl_h += f"<td colspan='8' style='padding:8px 10px;color:{C['muted']};font-size:11px;text-transform:uppercase;letter-spacing:.05em'>Total ({len(opts_display)} trades)</td>"
-            tbl_h += _cell(_tot_prime, C['green'] if _tot_prime >= 0 else C['red'], bold=True)
+            tbl_h += _cell_usd(_tot_prime, C['green'] if _tot_prime >= 0 else C['red'], bold=True)
             tbl_h += _cell_frais(_tot_frais)
             tbl_h += _cell(_tot_pl, C['green'] if _tot_pl >= 0 else C['red'], bold=True)
             tbl_h += "<td></td></tr>"
