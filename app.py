@@ -1020,6 +1020,14 @@ def parse_ibkr_html(content_bytes):
                 if cours > 0:
                     cours_sous_jacents[sym] = cours
 
+    # ── Taux EUR/USD depuis transactions Forex ──────────────────────────────
+    fx_eur_usd = 1.10  # fallback
+    tbl_tx_all, rows_tx_all = find_table(['Symbole','Date/Heure','Quantité','Prix trans.'])
+    if tbl_tx_all:
+        _fx_list = [sf(_r[3]) for _r in rows_tx_all if _r[0].strip() == 'EUR.USD' and len(_r) > 3]
+        _fx_list = [x for x in _fx_list if 0.8 < x < 2.0]
+        if _fx_list: fx_eur_usd = sum(_fx_list)/len(_fx_list)
+
     # ── Transactions (trades) ────────────────────────────
     # Table avec "Symbole|Date/Heure|Quantité|Prix trans."
     tbl_tx, rows_tx = find_table(['Symbole','Date/Heure','Quantité','Prix trans.'])
@@ -1067,6 +1075,7 @@ def parse_ibkr_html(content_bytes):
                 'quantite':   qty,
                 'prix':       prix,
                 'produit':    produit,
+                'produit_eur':abs(produit)/fx_eur_usd if qty < 0 and produit != 0 else 0.0,
                 'frais':      comm,
                 'pl_realise': 0.0,  # sera rempli depuis synthèse
                 'statut':     statut,
@@ -1238,7 +1247,7 @@ def parse_ibkr_html(content_bytes):
         'positions':          positions_ouvertes,
         'actif_net':          actif_net,
         'frais':              sum(frais_par_sym.values()),  # frais options en EUR
-        'fx':                 1.16,   # HTML est en EUR, pas de taux FX à extraire
+        'fx':                 fx_eur_usd,  # taux EUR/USD du relevé
         'depots':             depots,
         'synthese_realise':   synthese_realise,
         'synthese_profit_ct': synthese_profit_ct,
@@ -1495,10 +1504,9 @@ with tab4:
             pl_net      = sum(t['pl_realise'] for t in sym_trades)
             # Prime encaissée = produit du trade d'OUVERTURE uniquement (vente initiale)
             # Ne pas inclure le rachat (négatif) pour les roulées/fermées
-            prime_nette  = open_trade.get('prime_enc_eur', 0.0)
-            # Fallback : si pas encore injecté, utiliser produit USD de l'ouverture
+            prime_nette  = sum(t.get('produit_eur', 0.0) for t in sym_trades if t['quantite'] < 0)
             if prime_nette == 0.0:
-                prime_nette = sum(abs(t['produit']) for t in sym_trades if t['quantite'] < 0)
+                prime_nette = abs(open_trade.get('prime_enc_eur', 0.0))
             # Frais = déjà injectés depuis Synthèse évaluée (même valeur sur tous les trades)
             frais_tot   = open_trade.get('frais', 0.0)
             type_tr = open_trade.get('type_trade', '')
