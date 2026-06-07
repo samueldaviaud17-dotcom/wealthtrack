@@ -1765,14 +1765,14 @@ border:1px solid {C['gold']}44'>
 
             tbl_o = f"<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:12px'>"
             tbl_o += "<thead><tr style='background:#0A1A0D'>"
-            tbl_o += _THL("Symbole","12%") + _THL("Ticker","4%") + _THL("Type","7%") + _THC("Qté","4%") + _THL("C/P","3%") + _THL("Strike","5%") + _THC("Prix Live","5%") + _THL("Ouverture","6%") + _THL("Expiration","6%") + _THC("J. restants","5%") + _THC("Marge","6%") + _TH("Prime enc.","8%") + _TH("Frais","6%") + _TH("Prime obtenue","8%")
+            tbl_o += _THL("Symbole","14%") + _THL("Ticker","5%") + _THL("Type","8%") + _THC("Qté","4%") + _THL("C/P","3%") + _THL("Strike","5%") + _THC("Prix Live","5%") + _THL("Ouverture","7%") + _THL("Expiration","7%") + _THC("J. restants","6%") + _THC("Marge","7%") + _TH("Frais","7%") + _TH("Prime obtenue","10%")
             tbl_o += "</tr></thead><tbody>"
-            _tot_o_prime = _tot_o_frais = _tot_o_pl = 0.0
+            _tot_o_frais = _tot_o_pl = 0.0
             for o in _open_sorted:
                 _cp_col  = C['purple'] if o['call_put'] == 'C' else C['gold']
                 _pl_col  = C['green'] if o['pl_net'] >= 0 else C['red']
                 _pn_col  = C['green'] if o['prime_nette'] >= 0 else C['red']
-                _tot_o_prime += o['prime_nette']; _tot_o_frais += o['frais']; _tot_o_pl += o['pl_net']
+                _tot_o_frais += o['frais']; _tot_o_pl += o['pl_net']
                 tbl_o += f"<tr style='border-bottom:1px solid {C['border']}22'>"
                 _tt = o.get('type_trade','')
                 _tt_col = "#9945FF" if 'Put' in _tt else "#627EEA"
@@ -1837,18 +1837,15 @@ border:1px solid {C['gold']}44'>
                     _j_txt = "—"; _j_col = C['muted']
                 tbl_o += f"<td style='padding:7px 10px;text-align:center;font-weight:700;color:{_j_col}'>{_j_txt}</td>"
                 tbl_o += _m_cell
-                tbl_o += _cell_usd(o['prime_nette'], _pn_col, bold=True)
                 tbl_o += _cell_frais(o['frais'])
-                _po = o['prime_nette'] - o['frais']
+                _po = o['pl_net']
                 tbl_o += _cell(_po, C['green'] if _po >= 0 else C['red'], bold=True)
                 tbl_o += "</tr>"
             # Ligne total
-            _tp_col = C['green'] if _tot_o_prime >= 0 else C['red']
             _tpl_col = C['green'] if _tot_o_pl >= 0 else C['red']
             tbl_o += f"<tr style='background:{C['card']};border-top:2px solid {C['border']};font-weight:700'>"
-            _tot_o_net = _tot_o_prime - _tot_o_frais
-            tbl_o += f"<td colspan='11' style='padding:8px 10px;color:{C['muted']};font-size:11px;text-transform:uppercase;letter-spacing:.05em'>Total</td>"
-            tbl_o += _cell_usd(_tot_o_prime, C['green'] if _tot_o_prime >= 0 else C['red'], bold=True)
+            _tot_o_net = _tot_o_pl
+            tbl_o += f"<td colspan='10' style='padding:8px 10px;color:{C['muted']};font-size:11px;text-transform:uppercase;letter-spacing:.05em'>Total</td>"
             tbl_o += _cell_frais(_tot_o_frais)
             tbl_o += _cell(_tot_o_net, C['green'] if _tot_o_net >= 0 else C['red'], bold=True)
             tbl_o += "</tr>"
@@ -1929,10 +1926,9 @@ border:1px solid {C['gold']}44'>
 
             tbl_h = f"<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:12px'>"
             tbl_h += "<thead><tr style='background:#111827'>"
-            tbl_h += (_THL("Symbole","14%") + _THL("Ticker","5%") + _THL("Type","9%") + _THC("Qté","4%") + _THL("C/P","4%") + _THL("Strike","5%") +
-                      _THL("Expiration","6%") + _THL("Ouverture","7%") +
-                      _TH("Prime brute enc.","10%") +
-                      _TH("Frais","7%") +
+            tbl_h += (_THL("Symbole","16%") + _THL("Ticker","5%") + _THL("Type","9%") + _THC("Qté","4%") + _THL("C/P","4%") + _THL("Strike","6%") +
+                      _THL("Expiration","7%") + _THL("Ouverture","7%") +
+                      _TH("Frais","8%") +
                       _TH("Prime obtenue","10%") + _TH("Statut","8%"))
             tbl_h += "</tr></thead><tbody>"
             _tot_prime = _tot_frais = _tot_pl = 0.0
@@ -1953,11 +1949,7 @@ border:1px solid {C['gold']}44'>
                 tbl_h += f"<td style='padding:7px 10px;color:{C['text']}'>${o['strike']}</td>"
                 tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_exp(o['expiration'])}</td>"
                 tbl_h += f"<td style='padding:7px 10px;color:{C['muted']}'>{_fmt_date(o['date'])}</td>"
-                # Prime encaissée : 0 pour options cross-year (ouverture dans autre relevé)
-                if abs(o['prime_nette']) < 0.01 and abs(o['pl_net']) > 0.01:
-                    tbl_h += f"<td style='padding:6px 10px;text-align:right;color:{C['muted']}'>—<br><span style='font-size:9px'>cf. relevé préc.</span></td>"
-                else:
-                    tbl_h += _cell_usd(o['prime_nette'], _pn_col, bold=True)
+
                 tbl_h += _cell_frais(o['frais'])
                 tbl_h += _cell(o['pl_net'], _pl_col, bold=True)
                 tbl_h += f"<td style='padding:7px 10px;text-align:center'><span style='background:{_sbg};color:{_sc};border-radius:12px;padding:2px 8px;font-size:10px;font-weight:600'>{o['statut']}</span></td>"
@@ -1967,7 +1959,6 @@ border:1px solid {C['gold']}44'>
             _tpl_col = C['green'] if _tot_pl    >= 0 else C['red']
             tbl_h += f"<tr style='background:{C['card']};border-top:2px solid {C['border']};font-weight:700'>"
             tbl_h += f"<td colspan='8' style='padding:8px 10px;color:{C['muted']};font-size:11px;text-transform:uppercase;letter-spacing:.05em'>Total ({len(opts_display)} trades)</td>"
-            tbl_h += _cell_usd(_tot_prime, C['green'] if _tot_prime >= 0 else C['red'], bold=True)
             tbl_h += _cell_frais(_tot_frais)
             tbl_h += _cell(_tot_pl, C['green'] if _tot_pl >= 0 else C['red'], bold=True)
             tbl_h += "<td></td></tr>"
