@@ -1325,12 +1325,12 @@ def compute_ibkr_kpis(ibkr_data, **kwargs):
     fx_live = kwargs.get('fx_live', None)
     fx_historique = fx_live if fx_live and 0.8 < fx_live < 2.0 else fx
 
-    # Primes brutes encaissées = somme des produits des ventes d'ouverture en EUR
-    # (= prime reçue à l'ouverture, avant rachat/frais)
+    # Primes brutes encaissées = somme des Profit C/T > 0 de la Synthèse IBKR
+    # = primes des trades gagnants uniquement (hors rachats perdants des roulements)
     primes_brutes_eur = sum(
-        t.get('produit_eur', 0.0)
-        for t in all_trades
-        if t.get('quantite', 0) < 0 and t.get('produit_eur', 0.0) > 0
+        v for d in ibkr_data.values()
+        for v in d.get('synthese_profit_ct', {}).values()
+        if v > 0
     )
     primes_brutes_usd = primes_brutes_eur * fx_historique
 
@@ -1630,7 +1630,7 @@ border:1px solid {C['gold']}44'>
 💰 PRIMES BRUTES ENCAISSÉES</div>
 <div style='font-size:22px;font-weight:700;color:{C['gold']};font-family:Space Grotesk'>
 {_ibkr_kpis_all['primes_brutes_eur']:+.2f} €</div>
-<div style='font-size:11px;color:{C['muted']};margin-top:2px'>≈ ${_ibkr_kpis_all.get('primes_brutes_usd', _ibkr_kpis_all['primes_brutes_eur']*1.075):.2f} · primes ventes d'ouverture</div>
+<div style='font-size:11px;color:{C['muted']};margin-top:2px'>≈ ${_ibkr_kpis_all.get('primes_brutes_usd', _ibkr_kpis_all['primes_brutes_eur']*1.075):.2f} · Profit C/T positifs (hors roulements)</div>
 <div style='border-top:1px solid {C['border']};margin:6px 0 4px'></div>
 <div style='font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.06em'>P&L NET réalisé (gains − pertes)</div>
 <div style='font-size:16px;font-weight:700;color:{pcol(_primes_all)};font-family:Space Grotesk'>
