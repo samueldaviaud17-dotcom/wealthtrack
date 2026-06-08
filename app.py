@@ -1261,11 +1261,11 @@ def parse_ibkr_html(content_bytes):
             if len(row) < 4: continue
             qty2  = sf(row[2])
             prix2 = sf(row[3])
-            if qty2 > 0 and prix2 > 0:  # achat uniquement
+            if qty2 != 0 and prix2 > 0:  # achats ET ventes d'actions (coût moyen pondéré réel)
                 if sym2 not in achats_actions:
                     achats_actions[sym2] = {'qty_total': 0.0, 'cout_total': 0.0}
-                achats_actions[sym2]['qty_total']  += qty2
-                achats_actions[sym2]['cout_total'] += qty2 * prix2
+                achats_actions[sym2]['qty_total']  += qty2           # + achat, - vente
+                achats_actions[sym2]['cout_total'] += qty2 * prix2   # + achat, - vente
 
     # ── Dépôts EUR (table Date|Description|Montant) ────────
     tbl_dep, rows_dep = find_table(['Date', 'Description', 'Montant'])
