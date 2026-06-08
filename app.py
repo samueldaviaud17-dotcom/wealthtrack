@@ -1317,12 +1317,6 @@ def compute_ibkr_kpis(ibkr_data, **kwargs):
     # Primes nettes EUR = P&L réalisé net (gains - pertes)
     primes_nettes_eur = sum(t['pl_realise'] for t in all_trades)
 
-    # Primes brutes USD = Profit C/T EUR × taux EUR/USD historique moyen (~1.075)
-    # Logique identique au Google Sheet : sum(profit_ct) × taux_moyen
-    profit_ct_eur = sum(
-        v for d in ibkr_data.values()
-        for v in d.get('synthese_profit_ct', {}).values()
-    )
     # Taux FX moyen des CSV (calculé avant le fallback)
     fx_rates = [d.get('fx', 1.16) for d in ibkr_data.values() if 0.8 <= d.get('fx', 0) <= 1.8]
     fx = sum(fx_rates) / len(fx_rates) if fx_rates else 1.16
@@ -1330,8 +1324,15 @@ def compute_ibkr_kpis(ibkr_data, **kwargs):
     # Taux EUR/USD : live si disponible, sinon taux moyen des CSV
     fx_live = kwargs.get('fx_live', None)
     fx_historique = fx_live if fx_live and 0.8 < fx_live < 2.0 else fx
-    primes_brutes_usd = profit_ct_eur * fx_historique
-    primes_brutes_eur = profit_ct_eur  # valeur EUR brute (avant conversion)
+
+    # Primes brutes encaissées = somme des produits des ventes d'ouverture en EUR
+    # (= prime reçue à l'ouverture, avant rachat/frais)
+    primes_brutes_eur = sum(
+        t.get('produit_eur', 0.0)
+        for t in all_trades
+        if t.get('quantite', 0) < 0 and t.get('produit_eur', 0.0) > 0
+    )
+    primes_brutes_usd = primes_brutes_eur * fx_historique
 
     # Capital actuel = capital investi + primes nettes
     capital_actuel = capital_investi + primes_nettes_eur
@@ -1629,7 +1630,7 @@ border:1px solid {C['gold']}44'>
 💰 PRIMES BRUTES ENCAISSÉES</div>
 <div style='font-size:22px;font-weight:700;color:{C['gold']};font-family:Space Grotesk'>
 {_ibkr_kpis_all['primes_brutes_eur']:+.2f} €</div>
-<div style='font-size:11px;color:{C['muted']};margin-top:2px'>≈ ${_ibkr_kpis_all.get('primes_brutes_usd', _ibkr_kpis_all['primes_brutes_eur']*1.075):.2f} · Profit C/T (logique Sheet)</div>
+<div style='font-size:11px;color:{C['muted']};margin-top:2px'>≈ ${_ibkr_kpis_all.get('primes_brutes_usd', _ibkr_kpis_all['primes_brutes_eur']*1.075):.2f} · primes ventes d'ouverture</div>
 <div style='border-top:1px solid {C['border']};margin:6px 0 4px'></div>
 <div style='font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.06em'>P&L NET réalisé (gains − pertes)</div>
 <div style='font-size:16px;font-weight:700;color:{pcol(_primes_all)};font-family:Space Grotesk'>
@@ -1845,7 +1846,7 @@ border:1px solid {C['gold']}44'>
             _tpl_col = C['green'] if _tot_o_pl >= 0 else C['red']
             tbl_o += f"<tr style='background:{C['card']};border-top:2px solid {C['border']};font-weight:700'>"
             _tot_o_net = _tot_o_pl
-            tbl_o += f"<td colspan='10' style='padding:8px 10px;color:{C['muted']};font-size:11px;text-transform:uppercase;letter-spacing:.05em'>Total</td>"
+            tbl_o += f"<td colspan='11' style='padding:8px 10px;color:{C['muted']};font-size:11px;text-transform:uppercase;letter-spacing:.05em'>Total</td>"
             tbl_o += _cell_frais(_tot_o_frais)
             tbl_o += _cell(_tot_o_net, C['green'] if _tot_o_net >= 0 else C['red'], bold=True)
             tbl_o += "</tr>"
