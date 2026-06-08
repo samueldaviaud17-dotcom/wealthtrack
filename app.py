@@ -1199,25 +1199,45 @@ def parse_ibkr_html(content_bytes):
             if close_trades:
                 close_trades[-1]['pl_realise'] = real_pl
 
-    # ── Positions ouvertes ───────────────────────────────
+    # ── Positions ouvertes options + actions détenues ────────
+    actions_detenues = {}  # {ticker: {quantite, pru_classique, valeur}}
     tbl_pos, rows_pos = find_table(['Symbole','Quantité','Mult','Coût'])
     if tbl_pos:
         in_opts = False
+        in_actions = False
         for row in rows_pos:
             if not row: continue
             sym = row[0].strip()
-            if sym == 'Options sur actions et indices': in_opts = True; continue
-            if sym in ('Actions','Total','Total en EUR','Symbole','USD','EUR'): continue
-            if not in_opts or sym.startswith('Total') or not sym: continue
+            if sym == 'Actions': in_actions = True; in_opts = False; continue
+            if sym == 'Options sur actions et indices': in_opts = True; in_actions = False; continue
+            if sym in ('Total','Total en EUR','Symbole','USD','EUR','Forex',
+                       'Total Actions','Total Options sur actions et indices'): continue
+            if sym.startswith('Total') or not sym: continue
             if len(row) < 7: continue
-            positions_ouvertes.append({
-                'symbole':   sym,
-                'quantite':  sf(row[1]),
-                'cours':     sf(row[5]),
-                'valeur':    sf(row[6]),
-                'pl_unreal': sf(row[7]) if len(row) > 7 else 0.0,
-                'annee':     year,
-            })
+            if in_actions:
+                qty  = sf(row[1])
+                cout = sf(row[3])   # coût total position
+                prix = sf(row[5])   # cours actuel
+                valeur = sf(row[6])
+                if qty != 0:
+                    pru_ibkr = abs(cout / qty) if qty else 0.0
+                    actions_detenues[sym] = {
+                        'ticker':        sym,
+                        'quantite':      qty,
+                        'pru_classique': pru_ibkr,
+                        'cours':         prix,
+                        'valeur':        valeur,
+                        'annee':         year,
+                    }
+            if in_opts:
+                positions_ouvertes.append({
+                    'symbole':   sym,
+                    'quantite':  sf(row[1]),
+                    'cours':     sf(row[5]),
+                    'valeur':    sf(row[6]),
+                    'pl_unreal': sf(row[7]) if len(row) > 7 else 0.0,
+                    'annee':     year,
+                })
 
     # ── Actif net (depuis table infos compte) ─────────────
     for tbl in tables:
@@ -1257,6 +1277,7 @@ def parse_ibkr_html(content_bytes):
         'synthese_nonrealise':synthese_nonrealise,
         'cours_sous_jacents': cours_sous_jacents,
         'frais_par_sym':     frais_par_sym,
+        'actions_detenues':  actions_detenues,
     }
 
 
@@ -1965,6 +1986,163 @@ border:1px solid {C['gold']}44'>
             tbl_h += "<td></td></tr>"
             tbl_h += "</tbody></table></div>"
             st.markdown(tbl_h, unsafe_allow_html=True)
+
+        # ══════════════════════════════════════════════════════
+        # TABLEAU MENSUEL DES PRIMES
+        # ══════════════════════════════════════════════════════
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        sec("Rendement mensuel des primes", "📅", "#FDA4AF", "#1C0A12")
+
+        # Construire le dict mois→total_real depuis la Synthèse par trade
+        # On regroupe les trades clôturés par (année, mois) via leur date de clôture/expiration
+        # Source : synthese_realise[sym] = total_real EUR pour chaque symbole
+        # On mappe chaque symbole à son mois via le trade de clôture
+        _MOIS_FR = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc']
+
+        # Construire tableau par année
+        _years_disp = sorted(st.session_state['ibkr_data'].keys())
+        for _yr in _years_disp:
+            _yr_data = st.session_state['ibkr_data'][_yr]
+            _fx_yr   = _yr_data.get('fx', 1.10)
+            _synth_r = _yr_data.get('synthese_realise', {})  # {sym: total_real EUR}
+            _trades_yr = _yr_data.get('trades', [])
+
+            # Mapper symbole → mois de clôture (date du trade de clôture qty>0, ou expiration)
+            _sym_mois = {}
+            for t in _trades_yr:
+                sym = t['symbole']
+                qty = t.get('quantite', 0)
+                date_s = t.get('date', '')
+                if qty > 0 or 'Ep' in t.get('code','') or 'A' in t.get('code',''):
+                    # trade de clôture → récupérer le mois
+                    try:
+                        from datetime import datetime as _dt2
+                        _m = _dt2.strptime(date_s, '%Y-%m-%d').month
+                        _sym_mois[sym] = _m
+                    except: pass
+
+            # Agréger total_real par mois
+            _primes_mois = {m: 0.0 for m in range(1, 13)}
+            for sym, total_real in _synth_r.items():
+                mois = _sym_mois.get(sym)
+                if mois:
+                    _primes_mois[mois] += total_real
+
+            # Afficher le tableau
+            st.markdown(f"<div style='font-size:12px;font-weight:600;color:#FDA4AF;margin:8px 0 6px'>📆 {_yr}</div>", unsafe_allow_html=True)
+            _tbl_m  = f"<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:11px'>"
+            _tbl_m += "<thead><tr style='background:#1C0A12'>"
+            _tbl_m += "".join([f"<th style='padding:6px 10px;text-align:center;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']};width:8.3%'>{m}</th>" for m in _MOIS_FR])
+            _tbl_m += "</tr></thead><tbody><tr>"
+            _cumul = 0.0
+            _tot_m = 0.0
+            for mois in range(1, 13):
+                v_eur = _primes_mois[mois]
+                _tot_m += v_eur
+                _col_v = C['green'] if v_eur > 0 else (C['red'] if v_eur < 0 else C['muted'])
+                _bg_v  = '#0D2A0D' if v_eur > 0 else ('#2A0D0D' if v_eur < 0 else 'transparent')
+                if v_eur != 0:
+                    _cell_content = (f"<div style='font-weight:700;color:{_col_v}'>{v_eur:+.2f} €</div>"
+                                     f"<div style='font-size:9px;color:{_col_v};opacity:.7'>{v_eur*_fx_yr:+.2f} $</div>")
+                else:
+                    _cell_content = f"<div style='color:{C['muted']};font-size:10px'>—</div>"
+                _tbl_m += f"<td style='padding:6px 8px;text-align:center;background:{_bg_v};border:1px solid {C['border']}22'>{_cell_content}</td>"
+            _tbl_m += "</tr></tbody>"
+            # Ligne total
+            _tot_col = C['green'] if _tot_m > 0 else (C['red'] if _tot_m < 0 else C['muted'])
+            _tbl_m += (f"<tfoot><tr><td colspan='12' style='padding:6px 10px;text-align:right;"
+                       f"font-weight:700;font-size:11px;color:{_tot_col};border-top:1px solid {C['border']}'>"
+                       f"Total {_yr} : {_tot_m:+.2f} € ≈ {_tot_m*_fx_yr:+.2f} $</td></tr></tfoot>")
+            _tbl_m += "</table></div>"
+            st.markdown(_tbl_m, unsafe_allow_html=True)
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+        # ══════════════════════════════════════════════════════
+        # TABLEAU ACTIONS IBKR (PRU classique / PRU ajusté)
+        # ══════════════════════════════════════════════════════
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        sec("Actions détenues sur IBKR", "📦", "#F0883E", "#1C1000")
+
+        # Fusionner actions_detenues de toutes les années (garder la plus récente)
+        _all_actions = {}
+        for _yr in sorted(st.session_state['ibkr_data'].keys()):
+            _yr_data = st.session_state['ibkr_data'][_yr]
+            for ticker, info in _yr_data.get('actions_detenues', {}).items():
+                _all_actions[ticker] = info  # écrase par la plus récente
+
+        # Calculer total des primes par ticker (toutes années confondues)
+        # = somme de synthese_realise[sym] pour tous les sym dont le ticker = ticker
+        def _ticker_from_sym(sym):
+            return sym.split()[0] if sym else ''
+
+        _primes_par_ticker = {}
+        for _yr_data in st.session_state['ibkr_data'].values():
+            for sym, total_real in _yr_data.get('synthese_realise', {}).items():
+                tk = _ticker_from_sym(sym)
+                _primes_par_ticker[tk] = _primes_par_ticker.get(tk, 0.0) + total_real
+
+        if _all_actions:
+            _fx_live_act = st.session_state.get('eurusd_live', 1.10)
+
+            _tbl_act  = f"<div style='overflow-x:auto'><table style='width:100%;border-collapse:collapse;font-size:12px'>"
+            _tbl_act += "<thead><tr style='background:#1C1000'>"
+            _tbl_act += (
+                f"<th style='padding:7px 12px;text-align:left;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']}'>Ticker</th>"
+                f"<th style='padding:7px 12px;text-align:center;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']}'>Qté</th>"
+                f"<th style='padding:7px 12px;text-align:right;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']}'>PRU Classique</th>"
+                f"<th style='padding:7px 12px;text-align:right;font-size:10px;color:{C['gold']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']}'>PRU Ajusté ★</th>"
+                f"<th style='padding:7px 12px;text-align:right;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']}'>Cours Live</th>"
+                f"<th style='padding:7px 12px;text-align:right;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']}'>PV/MV Classique</th>"
+                f"<th style='padding:7px 12px;text-align:right;font-size:10px;color:{C['gold']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']}'>PV/MV Ajusté</th>"
+                f"<th style='padding:7px 12px;text-align:right;font-size:10px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid {C['border']}'>Primes totales</th>"
+            )
+            _tbl_act += "</tr></thead><tbody>"
+
+            for ticker, info in sorted(_all_actions.items()):
+                qty         = info['quantite']
+                pru_class   = info['pru_classique']   # USD (IBKR)
+                cours_usd   = _cours_actions_usd.get(ticker, info.get('cours', 0.0))
+                primes_tot  = _primes_par_ticker.get(ticker, 0.0)  # EUR
+
+                # PRU ajusté = PRU classique - (primes totales en USD / qty)
+                primes_tot_usd = primes_tot * _fx_live_act if _fx_live_act else primes_tot * 1.10
+                pru_ajuste = pru_class - (primes_tot_usd / qty) if qty != 0 else pru_class
+
+                pvmv_class = (cours_usd - pru_class) * qty if cours_usd > 0 else None
+                pvmv_ajust = (cours_usd - pru_ajuste) * qty if cours_usd > 0 else None
+                pvmv_class_pct = (cours_usd / pru_class - 1) * 100 if pru_class > 0 and cours_usd > 0 else None
+                pvmv_ajust_pct = (cours_usd / pru_ajuste - 1) * 100 if pru_ajuste > 0 and cours_usd > 0 else None
+
+                def _pvmv_cell(val, pct):
+                    if val is None: return f"<td style='padding:7px 12px;text-align:right;color:{C["muted"]}'>—</td>"
+                    col = C['green'] if val >= 0 else C['red']
+                    bg  = '#0D2A0D' if val >= 0 else '#2A0D0D'
+                    return (f"<td style='padding:7px 12px;text-align:right;background:{bg};border-radius:4px'>"
+                            f"<span style='color:{col};font-weight:700'>{val:+.2f} $</span><br>"
+                            f"<span style='color:{col};font-size:10px;opacity:.8'>{pct:+.1f}%</span></td>")
+
+                _cours_cell = (f"<span style='color:{C['cyan']};font-weight:700'>${cours_usd:.2f}</span>" if cours_usd > 0
+                               else f"<span style='color:{C['muted']}'>—</span>")
+                _pru_aj_col = C['gold'] if pru_ajuste < pru_class else C['text']
+
+                _tbl_act += f"<tr style='border-bottom:1px solid {C['border']}22'>"
+                _tbl_act += f"<td style='padding:7px 12px;font-weight:700;color:{C['text']};font-size:13px'>{ticker}</td>"
+                _tbl_act += f"<td style='padding:7px 12px;text-align:center;color:{C['text']};font-weight:600'>{int(qty)}</td>"
+                _tbl_act += f"<td style='padding:7px 12px;text-align:right;color:{C['muted']}'>${pru_class:.2f}</td>"
+                _tbl_act += f"<td style='padding:7px 12px;text-align:right;font-weight:700;color:{_pru_aj_col}'>${pru_ajuste:.2f}</td>"
+                _tbl_act += f"<td style='padding:7px 12px;text-align:right'>{_cours_cell}</td>"
+                _tbl_act += _pvmv_cell(pvmv_class, pvmv_class_pct)
+                _tbl_act += _pvmv_cell(pvmv_ajust, pvmv_ajust_pct)
+                _tbl_act += f"<td style='padding:7px 12px;text-align:right;color:{C['green']}'>{primes_tot:+.2f} €<br><span style='font-size:10px;opacity:.7'>{primes_tot_usd:+.2f} $</span></td>"
+                _tbl_act += "</tr>"
+
+            _tbl_act += "</tbody></table></div>"
+            st.markdown(_tbl_act, unsafe_allow_html=True)
+            st.markdown(f"""<div style='font-size:10px;color:{C['muted']};padding:6px 0;font-style:italic'>
+★ PRU Ajusté = PRU Classique − (toutes primes perçues sur ce ticker ÷ nombre d'actions).
+En dessous du PRU Ajusté = seuil pour vendre des calls sans risque de perte en cas d'assignation.</div>""", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div style='font-size:12px;color:{C['muted']};font-style:italic;padding:8px 0'>Aucune action détenue dans les relevés IBKR chargés.</div>", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════
 with tab5:
