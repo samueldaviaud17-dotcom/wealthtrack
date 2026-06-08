@@ -1215,12 +1215,11 @@ def parse_ibkr_html(content_bytes):
             if sym.startswith('Total') or not sym: continue
             if len(row) < 7: continue
             if in_actions:
-                qty  = sf(row[1])
-                cout = sf(row[3])   # coût total position
-                prix = sf(row[5])   # cours actuel
-                valeur = sf(row[6])
-                if qty != 0:
-                    pru_ibkr = abs(cout / qty) if qty else 0.0
+                qty      = sf(row[1])
+                pru_ibkr = sf(row[3])   # col[3] = prix unitaire (Coût moyen IBKR)
+                prix     = sf(row[5])   # col[5] = cours de clôture
+                valeur   = sf(row[6])
+                if qty != 0 and pru_ibkr > 0:
                     actions_detenues[sym] = {
                         'ticker':        sym,
                         'quantite':      qty,
@@ -1246,6 +1245,27 @@ def parse_ibkr_html(content_bytes):
             if 'Total' in row[0] and len(row) >= 4:
                 v = sf(row[3]) if len(row) > 3 else 0.0
                 if v > 1000: actif_net = v; break
+
+    # ── Achats actions (pour PRU classique réel) ─────────────
+    # Source : table transactions (Symbole/Date/Heure/Quantité/Prix trans.)
+    # On prend qty > 0 dans la section Actions = achats réels au prix de marché
+    achats_actions = {}  # {ticker: {'qty_total': x, 'cout_total': y}}
+    tbl_tx2, rows_tx2 = find_table(['Symbole','Date/Heure','Quantité','Prix trans.'])
+    if tbl_tx2:
+        in_act2 = False
+        for row in rows_tx2[1:]:
+            sym2 = row[0].strip() if row else ''
+            if sym2 == 'Actions': in_act2 = True; continue
+            if sym2 in ('Options sur actions et indices','Forex','Contrats à terme'): in_act2 = False; continue
+            if not in_act2 or not sym2 or sym2.startswith('Total') or sym2 == 'Symbole': continue
+            if len(row) < 4: continue
+            qty2  = sf(row[2])
+            prix2 = sf(row[3])
+            if qty2 > 0 and prix2 > 0:  # achat uniquement
+                if sym2 not in achats_actions:
+                    achats_actions[sym2] = {'qty_total': 0.0, 'cout_total': 0.0}
+                achats_actions[sym2]['qty_total']  += qty2
+                achats_actions[sym2]['cout_total'] += qty2 * prix2
 
     # ── Dépôts EUR (table Date|Description|Montant) ────────
     tbl_dep, rows_dep = find_table(['Date', 'Description', 'Montant'])
@@ -1278,6 +1298,7 @@ def parse_ibkr_html(content_bytes):
         'cours_sous_jacents': cours_sous_jacents,
         'frais_par_sym':     frais_par_sym,
         'actions_detenues':  actions_detenues,
+        'achats_actions':     achats_actions,
     }
 
 
@@ -2070,8 +2091,17 @@ border:1px solid {C['gold']}44'>
             for ticker, info in _yr_data.get('actions_detenues', {}).items():
                 _all_actions[ticker] = info  # écrase par la plus récente
 
+        # PRU classique réel = recalculé depuis les achats réels (toutes années)
+        # = Σ(qty × prix_achat) / Σ(qty) — ignorer le PRU IBKR qui intègre les primes
+        _achats_cumul = {}  # {ticker: {qty_total, cout_total}}
+        for _yr_data in st.session_state['ibkr_data'].values():
+            for ticker, ach in _yr_data.get('achats_actions', {}).items():
+                if ticker not in _achats_cumul:
+                    _achats_cumul[ticker] = {'qty_total': 0.0, 'cout_total': 0.0}
+                _achats_cumul[ticker]['qty_total']  += ach['qty_total']
+                _achats_cumul[ticker]['cout_total'] += ach['cout_total']
+
         # Calculer total des primes par ticker (toutes années confondues)
-        # = somme de synthese_realise[sym] pour tous les sym dont le ticker = ticker
         def _ticker_from_sym(sym):
             return sym.split()[0] if sym else ''
 
@@ -2099,13 +2129,19 @@ border:1px solid {C['gold']}44'>
             _tbl_act += "</tr></thead><tbody>"
 
             for ticker, info in sorted(_all_actions.items()):
-                qty         = info['quantite']
-                pru_class   = info['pru_classique']   # USD (IBKR)
-                cours_usd   = _cours_actions_usd.get(ticker, info.get('cours', 0.0))
-                primes_tot  = _primes_par_ticker.get(ticker, 0.0)  # EUR
+                qty        = info['quantite']
+                cours_usd  = _cours_actions_usd.get(ticker, info.get('cours', 0.0))
+                primes_tot = _primes_par_ticker.get(ticker, 0.0)  # EUR
 
-                # PRU ajusté = PRU classique - (primes totales en USD / qty)
-                primes_tot_usd = primes_tot * _fx_live_act if _fx_live_act else primes_tot * 1.10
+                # PRU classique = recalculé depuis les vrais achats (ignorer IBKR qui intègre les primes)
+                _ach = _achats_cumul.get(ticker, {})
+                if _ach.get('qty_total', 0) > 0:
+                    pru_class = _ach['cout_total'] / _ach['qty_total']
+                else:
+                    pru_class = info['pru_classique']  # fallback IBKR si pas de transaction trouvée
+
+                # PRU ajusté = PRU classique - (primes totales en USD / qty actuelle)
+                primes_tot_usd = primes_tot * (_fx_live_act if _fx_live_act else 1.10)
                 pru_ajuste = pru_class - (primes_tot_usd / qty) if qty != 0 else pru_class
 
                 pvmv_class = (cours_usd - pru_class) * qty if cours_usd > 0 else None
@@ -2114,7 +2150,7 @@ border:1px solid {C['gold']}44'>
                 pvmv_ajust_pct = (cours_usd / pru_ajuste - 1) * 100 if pru_ajuste > 0 and cours_usd > 0 else None
 
                 def _pvmv_cell(val, pct):
-                    if val is None: return f"<td style='padding:7px 12px;text-align:right;color:{C["muted"]}'>—</td>"
+                    if val is None or pct is None: return f"<td style='padding:7px 12px;text-align:right;color:{C['muted']}'>—</td>"
                     col = C['green'] if val >= 0 else C['red']
                     bg  = '#0D2A0D' if val >= 0 else '#2A0D0D'
                     return (f"<td style='padding:7px 12px;text-align:right;background:{bg};border-radius:4px'>"
