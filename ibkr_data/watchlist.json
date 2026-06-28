@@ -1,0 +1,18 @@
+{
+  "wl_portefeuille": [
+    {
+      "name": "Microsoft Corporation",
+      "ticker": "MSFT",
+      "cours": 327.47,
+      "pru": 0.0,
+      "cible": 448.3991395870608,
+      "a_payer": 250.57852830988605,
+      "upside": 36.92831086421986,
+      "statut": "buy",
+      "method": "EPS / PER",
+      "liste": "wl_portefeuille"
+    }
+  ],
+  "wl_options": [],
+  "wl_surveillance": []
+}
