@@ -1422,40 +1422,94 @@ with tab1:
                     _fg_label, _fg_col = _FG_LABELS.get(_fg_data['rating'].lower(), ('—', C['muted']))
                     _fg_delta = _fg_score - _fg_prev
                     _fg_delta_col = C['red'] if _fg_delta < 0 else C['green']
-                    # Gauge SVG demi-cercle
-                    _rad = _math.radians(180 - (_fg_score / 100 * 180))
-                    _cx, _cy, _rn = 55, 50, 38
-                    _nx = _cx + _rn * _math.cos(_rad)
-                    _ny = _cy - _rn * _math.sin(_rad)
-                    # Arc total = π*r = 157.08 pour r=50 (viewBox 110×60, r=50 centré en 55,50)
-                    # 5 zones : 0-25 EF, 25-45 F, 45-55 N, 55-75 G, 75-100 EG
-                    # stroke-dasharray = (arc_zone) (reste) avec offset cumulé
-                    _arcs = [
-                        ('#EF4444', 39.27,   0),      # 0-25%   = 25% de 157.08
-                        ('#F97316', 31.42,  39.27),   # 25-45%  = 20%
-                        ('#EAB308', 15.71,  70.69),   # 45-55%  = 10%
-                        ('#84CC16', 31.42,  86.40),   # 55-75%  = 20%
-                        ('#22C55E', 39.27, 117.82),   # 75-100% = 25%
+
+                    # ── Gauge SVG demi-cercle ──
+                    # Centre (110,105), r=90, viewBox 220×115
+                    # score=0 → 180° (gauche), score=100 → 0° (droite)
+                    _CX, _CY, _R = 110, 105, 88
+                    _RI = 70  # rayon intérieur (épaisseur arc = 18)
+                    _ARC = _math.pi * _R  # longueur demi-cercle = 276.46
+
+                    def _pt(angle_deg, r):
+                        a = _math.radians(angle_deg)
+                        return _CX + r * _math.cos(a), _CY - r * _math.sin(a)
+
+                    # Zones : score 0→25→45→55→75→100 = angles 180→135→63→45→-27→0 (NON)
+                    # Mapping score→angle : angle = 180 - score*1.8
+                    # Zones en arcs SVG : on dessine 5 chemins de bord à bord
+                    def _arc_path(s_start, s_end, color):
+                        a1 = 180 - s_start * 1.8
+                        a2 = 180 - s_end * 1.8
+                        x1o, y1o = _pt(a1, _R)
+                        x2o, y2o = _pt(a2, _R)
+                        x1i, y1i = _pt(a1, _RI)
+                        x2i, y2i = _pt(a2, _RI)
+                        # arc extérieur gauche→droite (sens horaire = 0,1), arc intérieur droite→gauche
+                        return (f'<path d="M{x1o:.1f},{y1o:.1f} A{_R},{_R} 0 0,1 {x2o:.1f},{y2o:.1f} '
+                                f'L{x2i:.1f},{y2i:.1f} A{_RI},{_RI} 0 0,0 {x1i:.1f},{y1i:.1f} Z" '
+                                f'fill="{color}" opacity="0.85"/>')
+
+                    _zones_svg = (
+                        _arc_path(0,  25,  '#EF4444') +
+                        _arc_path(25, 45,  '#F97316') +
+                        _arc_path(45, 55,  '#EAB308') +
+                        _arc_path(55, 75,  '#84CC16') +
+                        _arc_path(75, 100, '#22C55E')
+                    )
+
+                    # Aiguille
+                    _needle_angle = 180 - _fg_score * 1.8
+                    _nrad = _math.radians(_needle_angle)
+                    _nx = _CX + 82 * _math.cos(_nrad)
+                    _ny = _CY - 82 * _math.sin(_nrad)
+
+                    # Ticks + labels repères 0,25,50,75,100
+                    _ticks_svg = ''
+                    for _v, _lbl in [(0,'0'),(25,'25'),(50,'50'),(75,'75'),(100,'100')]:
+                        _ta = 180 - _v * 1.8
+                        _tx1, _ty1 = _pt(_ta, _R + 4)
+                        _tx2, _ty2 = _pt(_ta, _R + 14)
+                        _tlx, _tly = _pt(_ta, _R + 26)
+                        _ticks_svg += f'<line x1="{_tx1:.1f}" y1="{_ty1:.1f}" x2="{_tx2:.1f}" y2="{_ty2:.1f}" stroke="#666" stroke-width="1.5"/>'
+                        _ticks_svg += f'<text x="{_tlx:.1f}" y="{_tly:.1f}" text-anchor="middle" dominant-baseline="middle" font-size="10" fill="#888">{_lbl}</text>'
+
+                    # Labels zones
+                    _zone_labels = [
+                        (12,  'Ext.
+Fear',  '#EF4444'),
+                        (35,  'Fear',        '#F97316'),
+                        (50,  'Neutral',     '#EAB308'),
+                        (65,  'Greed',       '#84CC16'),
+                        (87,  'Ext.
+Greed', '#22C55E'),
                     ]
-                    _arc_paths = ''.join([
-                        f'<path d="M5,50 A50,50 0 0,1 105,50" fill="none" stroke="{c}" stroke-width="10" stroke-dasharray="{a:.2f} 157.08" stroke-dashoffset="-{o:.2f}"/>'
-                        for c, a, o in _arcs
-                    ])
-                    _gauge = f"""<svg viewBox="0 0 110 58" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block;margin:2px 0 4px">
-  {_arc_paths}
-  <line x1="{_cx}" y1="{_cy}" x2="{_nx:.1f}" y2="{_ny:.1f}" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-  <circle cx="{_cx}" cy="{_cy}" r="4" fill="white"/>
+                    _zlabels_svg = ''
+                    for _zs, _zt, _zc in _zone_labels:
+                        _za = 180 - _zs * 1.8
+                        _zlx, _zly = _pt(_za, (_R + _RI) / 2)
+                        for _i, _line in enumerate(_zt.split('
+')):
+                            _zlabels_svg += f'<text x="{_zlx:.1f}" y="{_zly + _i*11 - (5 if chr(10) in _zt else 0):.1f}" text-anchor="middle" dominant-baseline="middle" font-size="9" font-weight="600" fill="{_zc}">{_line}</text>'
+
+                    _gauge = f"""<svg viewBox="0 0 220 140" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block">
+  {_zones_svg}
+  {_ticks_svg}
+  {_zlabels_svg}
+  <line x1="{_CX}" y1="{_CY}" x2="{_nx:.1f}" y2="{_ny:.1f}" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="{_CX}" cy="{_CY}" r="6" fill="white"/>
+  <circle cx="{_CX}" cy="{_CY}" r="3" fill="#333"/>
+  <text x="{_CX}" y="{_CY + 20}" text-anchor="middle" font-size="18" font-weight="700" fill="white">{_fg_score}</text>
 </svg>"""
+
                     st.markdown(f"""<div style="background:{C['card']};border:1px solid {_fg_col}44;border-radius:8px;padding:10px 14px 8px 14px">
-  <div style="font-size:11px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em">😨 Fear &amp; Greed — CNN</div>
+  <div style="font-size:11px;color:{C['muted']};text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">😨 Fear &amp; Greed — CNN</div>
   {_gauge}
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px">
-    <div style="font-family:'Space Grotesk';font-size:22px;font-weight:700">{_fg_score}</div>
-    <div style="padding:2px 8px;border-radius:4px;background:{_fg_col}22">
-      <span style="font-size:11px;font-weight:700;color:{_fg_col}">{_fg_label}</span>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+    <div style="padding:3px 10px;border-radius:4px;background:{_fg_col}22">
+      <span style="font-size:12px;font-weight:700;color:{_fg_col}">{_fg_label}</span>
     </div>
+    <div style="font-size:10px;color:{C['muted']}">Veille : <b style="color:{_fg_delta_col}">{_fg_prev}</b> ({'+' if _fg_delta>=0 else ''}{_fg_delta})</div>
   </div>
-  <div style="font-size:10px;color:{C['muted']};margin-top:3px">Veille : <b style="color:{_fg_delta_col}">{_fg_prev}</b> ({'+' if _fg_delta>=0 else ''}{_fg_delta})</div>
 </div>""", unsafe_allow_html=True)
 
 
