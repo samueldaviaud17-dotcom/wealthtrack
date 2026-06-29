@@ -11,18 +11,6 @@
       "statut": "buy",
       "method": "EPS / PER",
       "liste": "wl_portefeuille"
-    },
-    {
-      "name": "Alphabet Inc.",
-      "ticker": "GOOGL",
-      "cours": 308.13,
-      "pru": 0.0,
-      "cible": 390.3121813227895,
-      "a_payer": 218.11784042974614,
-      "upside": 26.67126904968342,
-      "statut": "buy",
-      "method": "EPS / PER",
-      "liste": "wl_portefeuille"
     }
   ],
   "wl_options": [],
