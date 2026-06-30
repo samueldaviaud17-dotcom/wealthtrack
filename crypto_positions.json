@@ -51,11 +51,11 @@
     },
     "USDC": {
       "nom": "USDC",
-      "investi_usd": 8303.44,
-      "achete": 15803.43,
-      "detenu": 7500.36,
+      "investi_usd": -6696.56,
+      "achete": 803.43,
+      "detenu": -7499.64,
       "frais_usd": 0.0,
-      "investi_eur": 5254.2
+      "investi_eur": -4745.8
     }
   },
   "conversions": [
