@@ -514,6 +514,15 @@
         "BTC": 100,
         "ETH": 50,
         "SOL": 50
+      },
+      {
+        "date": "2026-06-30",
+        "USDC": {
+          "investi_usd": 15000.0,
+          "achete": 15000.0
+        },
+        "montant_eur": 10000.0,
+        "frais_depot_eur": 1.0
       }
     ]
   }
