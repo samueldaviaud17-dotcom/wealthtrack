@@ -9,10 +9,9 @@
     },
     {
       "date": "2026-07-01",
-      "pvmv": 0,
-      "tri": 10.6,
-      "crypto_val_eur": 6993.0,
-      "_note": "pvmv=0 car Sheet inaccessible - à corriger via bouton Snapshot quand Sheet remarche."
+      "pvmv": 5186.0,
+      "tri": 10.899426858171637,
+      "crypto_val_eur": 6983.0
     }
   ]
 }
