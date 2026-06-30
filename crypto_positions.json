@@ -1,6 +1,6 @@
 {
   "_note": "Positions crypto Binance. Point de départ depuis Google Sheet 29/06/2026. Mise à jour via onglet Saisie DCA.",
-  "_last_update": "2026-06-29",
+  "_last_update": "2026-06-30",
   "frais_historiques": {
     "_note": "Frais Binance cumulés par année en €",
     "2022": 7.0,
@@ -50,10 +50,11 @@
     },
     "USDC": {
       "nom": "USDC",
-      "investi_usd": 803.44,
-      "achete": 803.43186001,
-      "detenu": 0.36128284,
-      "frais_usd": 0.0
+      "investi_usd": 15803.44,
+      "achete": 15803.43,
+      "detenu": 15000.36,
+      "frais_usd": 0.0,
+      "investi_eur": 10000.0
     }
   }
 }
