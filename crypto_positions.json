@@ -22,10 +22,11 @@
   "positions": {
     "BTC": {
       "nom": "Bitcoin",
-      "investi_usd": 1525.0,
-      "achete": 0.03480338,
-      "detenu": 0.0356658,
-      "frais_usd": 0.0
+      "investi_usd": 9025.0,
+      "achete": 0.03880338,
+      "detenu": 0.0396658,
+      "frais_usd": 0.0,
+      "investi_eur": 4745.8
     },
     "ETH": {
       "nom": "Ethereum",
@@ -50,11 +51,22 @@
     },
     "USDC": {
       "nom": "USDC",
-      "investi_usd": 15803.44,
+      "investi_usd": 8303.44,
       "achete": 15803.43,
-      "detenu": 15000.36,
+      "detenu": 7500.36,
       "frais_usd": 0.0,
-      "investi_eur": 10000.0
+      "investi_eur": 5254.2
     }
-  }
+  },
+  "conversions": [
+    {
+      "date": "2026-06-30",
+      "de": "USDC",
+      "vers": "BTC",
+      "qte_vendue": 7500.0,
+      "qte_achetee": 0.004,
+      "valeur_usd_vendue": 7500.0,
+      "valeur_usd_achetee": 7500.0
+    }
+  ]
 }
