@@ -57,16 +57,5 @@
       "frais_usd": 0.0,
       "investi_eur": -4745.8
     }
-  },
-  "conversions": [
-    {
-      "date": "2026-06-30",
-      "de": "USDC",
-      "vers": "BTC",
-      "qte_vendue": 7500.0,
-      "qte_achetee": 0.004,
-      "valeur_usd_vendue": 7500.0,
-      "valeur_usd_achetee": 7500.0
-    }
   ]
 }
