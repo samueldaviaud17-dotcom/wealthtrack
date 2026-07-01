@@ -2482,6 +2482,10 @@
           "Coiffeur": {
             "prevu": 22.0,
             "reel": 0
+          },
+          "Extra": {
+            "prevu": 130.0,
+            "reel": 0
           }
         },
         "frais_fixes": {},
