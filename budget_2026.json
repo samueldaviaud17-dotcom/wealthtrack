@@ -2474,6 +2474,10 @@
           "Cantine Travail": {
             "prevu": 80.0,
             "reel": 0
+          },
+          "Transport": {
+            "prevu": 100.0,
+            "reel": 0
           }
         },
         "frais_fixes": {},
