@@ -2470,6 +2470,10 @@
           "Course Alimentaire": {
             "prevu": 180.0,
             "reel": 0
+          },
+          "Cantine Travail": {
+            "prevu": 80.0,
+            "reel": 0
           }
         },
         "frais_fixes": {},
