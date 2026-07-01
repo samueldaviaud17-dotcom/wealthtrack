@@ -2463,7 +2463,15 @@
     },
     "2026-07": {
       "nom": "Juillet",
-      "transactions": [],
+      "transactions": [
+        {
+          "date": "2026-07-01",
+          "type": "Revenus",
+          "categorie": "Salaire",
+          "montant": 3803.58,
+          "description": ""
+        }
+      ],
       "budget_prevu": {
         "revenus": {
           "Salaire": {
