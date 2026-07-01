@@ -2546,6 +2546,10 @@
           "Trade Républic": {
             "prevu": 717.0,
             "reel": 0
+          },
+          "PEA Bourso": {
+            "prevu": 120.0,
+            "reel": 0
           }
         },
         "credits": {}
