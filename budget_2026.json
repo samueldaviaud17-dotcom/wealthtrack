@@ -2465,7 +2465,12 @@
       "nom": "Juillet",
       "transactions": [],
       "budget_prevu": {
-        "revenus": {},
+        "revenus": {
+          "Salaire": {
+            "prevu": 3803.58,
+            "reel": 0
+          }
+        },
         "depenses": {
           "Course Alimentaire": {
             "prevu": 180.0,
