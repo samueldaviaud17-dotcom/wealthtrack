@@ -2470,6 +2470,13 @@
           "categorie": "Salaire",
           "montant": 3803.58,
           "description": ""
+        },
+        {
+          "date": "2026-07-02",
+          "type": "Dépenses",
+          "categorie": "Extra",
+          "montant": 15.0,
+          "description": "Participation Kdo Isabelle Alstom"
         }
       ],
       "budget_prevu": {
