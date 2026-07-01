@@ -2556,7 +2556,12 @@
             "reel": 0
           }
         },
-        "credits": {}
+        "credits": {
+          "Crédit Voiture": {
+            "prevu": 120.01,
+            "reel": 0
+          }
+        }
       }
     }
   }
