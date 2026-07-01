@@ -2486,6 +2486,10 @@
           "Extra": {
             "prevu": 130.0,
             "reel": 0
+          },
+          "Contrôle Technique Voiture": {
+            "prevu": 70.0,
+            "reel": 0
           }
         },
         "frais_fixes": {},
