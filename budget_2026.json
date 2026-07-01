@@ -2550,6 +2550,10 @@
           "PEA Bourso": {
             "prevu": 120.0,
             "reel": 0
+          },
+          "PEL Crédit Mutuelle": {
+            "prevu": 45.0,
+            "reel": 0
           }
         },
         "credits": {}
