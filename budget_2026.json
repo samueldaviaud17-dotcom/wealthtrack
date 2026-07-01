@@ -2460,6 +2460,22 @@
           "description": ""
         }
       ]
+    },
+    "2026-07": {
+      "nom": "Juillet",
+      "transactions": [],
+      "budget_prevu": {
+        "revenus": {},
+        "depenses": {
+          "Course Alimentaire": {
+            "prevu": 180.0,
+            "reel": 0
+          }
+        },
+        "frais_fixes": {},
+        "epargne": {},
+        "credits": {}
+      }
     }
   }
 }
