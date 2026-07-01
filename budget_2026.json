@@ -2542,7 +2542,12 @@
             "echeance": 0
           }
         },
-        "epargne": {},
+        "epargne": {
+          "Trade Républic": {
+            "prevu": 717.0,
+            "reel": 0
+          }
+        },
         "credits": {}
       }
     }
