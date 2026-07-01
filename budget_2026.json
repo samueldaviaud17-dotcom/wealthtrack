@@ -2510,6 +2510,11 @@
             "prevu": 740.79,
             "reel": 0,
             "echeance": 0
+          },
+          "Electricité": {
+            "prevu": 33.21,
+            "reel": 0,
+            "echeance": 0
           }
         },
         "epargne": {},
