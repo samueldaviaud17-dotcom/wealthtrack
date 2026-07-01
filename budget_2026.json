@@ -2499,6 +2499,10 @@
           "Contrôle Technique Voiture": {
             "prevu": 70.0,
             "reel": 0
+          },
+          "Choco Boulot": {
+            "prevu": 40.0,
+            "reel": 0
           }
         },
         "frais_fixes": {
