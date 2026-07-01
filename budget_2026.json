@@ -2505,7 +2505,13 @@
             "reel": 0
           }
         },
-        "frais_fixes": {},
+        "frais_fixes": {
+          "Loyer": {
+            "prevu": 740.79,
+            "reel": 0,
+            "echeance": 0
+          }
+        },
         "epargne": {},
         "credits": {}
       }
