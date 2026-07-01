@@ -2469,6 +2469,10 @@
           "Salaire": {
             "prevu": 3803.58,
             "reel": 0
+          },
+          "Dividendes et Intérêts": {
+            "prevu": 17.0,
+            "reel": 0
           }
         },
         "depenses": {
