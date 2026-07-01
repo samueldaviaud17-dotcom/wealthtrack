@@ -2530,6 +2530,11 @@
             "prevu": 9.84,
             "reel": 0,
             "echeance": 0
+          },
+          "Frais bancaire": {
+            "prevu": 4.34,
+            "reel": 0,
+            "echeance": 0
           }
         },
         "epargne": {},
