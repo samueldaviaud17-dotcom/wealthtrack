@@ -5553,98 +5553,98 @@ with tab_saisie:
             else:
                 st.info("Aucune conversion enregistrée.")
 with tab_budget:
-    _BUD_COLOR = "#10B981"; _BUD_BG = "#0A1C12"; _BUD_PATH = "budget_2026.json"
+    _BUD_COLOR="#10B981"; _BUD_BG="#0A1C12"; _BUD_PATH="budget_2026.json"
 
     @st.cache_data(ttl=60, show_spinner=False)
     def _load_budget():
         raw, sha = gh_read(_BUD_PATH)
         if raw: return json.loads(raw.decode('utf-8')), sha
-        return {"annee": 2026, "mois": {}}, sha
+        return {"annee":2026,"mois":{}}, sha
 
     def _save_budget(data, msg="Budget update"):
-        raw, fresh_sha = gh_read(_BUD_PATH)
-        return gh_write(_BUD_PATH, json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'), msg, fresh_sha)
+        raw, sha = gh_read(_BUD_PATH)
+        return gh_write(_BUD_PATH, json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'), msg, sha)
 
-    _bud_data, _bud_sha = _load_budget()
-    _ML = {"2026-01":"Janvier","2026-02":"Février","2026-03":"Mars","2026-04":"Avril",
-           "2026-05":"Mai","2026-06":"Juin","2026-07":"Juillet","2026-08":"Août",
-           "2026-09":"Septembre","2026-10":"Octobre","2026-11":"Novembre","2026-12":"Décembre"}
-    _TYPES = ["Revenus","Dépenses","Frais Fixes","Épargne & Investissements","Crédits / Dettes"]
-    _TC = {"Revenus":"#10B981","Dépenses":"#F87171","Frais Fixes":"#FBBF24",
-           "Épargne & Investissements":"#818CF8","Crédits / Dettes":"#F59E0B"}
-    _now_p = datetime.now(_TZ_PARIS)
-    _mois_opts = sorted([k for k in _ML if k <= _now_p.strftime("%Y-%m")], reverse=True)
+    _bud_data, _ = _load_budget()
+    _ML={"2026-01":"Janvier","2026-02":"Février","2026-03":"Mars","2026-04":"Avril",
+         "2026-05":"Mai","2026-06":"Juin","2026-07":"Juillet","2026-08":"Août",
+         "2026-09":"Septembre","2026-10":"Octobre","2026-11":"Novembre","2026-12":"Décembre"}
+    _TYPES=["Revenus","Dépenses","Frais Fixes","Épargne & Investissements","Crédits / Dettes"]
+    _TC={"Revenus":"#10B981","Dépenses":"#F87171","Frais Fixes":"#FBBF24",
+         "Épargne & Investissements":"#818CF8","Crédits / Dettes":"#F59E0B"}
+    _now_p=datetime.now(_TZ_PARIS)
+    _mois_opts=sorted([k for k in _ML if k<=_now_p.strftime("%Y-%m")],reverse=True)
 
     def _sf(v):
         try: return float(v) if v is not None else 0.0
         except: return 0.0
 
-    def _pbar(pct, color, height=7):
-        pc = min(pct, 100); bc = "#F87171" if pct > 100 else color
-        return (f"<div style='background:#1F2937;border-radius:3px;height:{height}px;width:100%;margin:2px 0'>"
-                f"<div style='background:{bc};width:{pc:.0f}%;height:{height}px;border-radius:3px'></div></div>"
+    def _pb(pct, color, h=7):
+        pc=min(pct,100); bc="#F87171" if pct>100 else color
+        return (f"<div style='background:#1F2937;border-radius:3px;height:{h}px;width:100%;margin:2px 0'>"
+                f"<div style='background:{bc};width:{pc:.0f}%;height:{h}px;border-radius:3px'></div></div>"
                 f"<span style='font-size:9px;color:{bc}'>{pct:.0f}%</span>")
 
-    def _kpi_budget(label, reel, prevu, color, icon):
-        pct = (reel / prevu * 100) if prevu > 0 else 0
-        bc = "#F87171" if pct > 100 else color
-        pc_w = min(pct, 100)
+    def _kpi_bud(label, reel, prevu, color, icon):
+        pct=(reel/prevu*100) if prevu>0 else 0; bc="#F87171" if pct>100 else color; pc=min(pct,100)
         return (f"<div style='background:{C['card']};border:1px solid {color}44;border-radius:10px;padding:14px 16px'>"
                 f"<div style='font-size:9px;font-weight:700;color:{C['muted']};text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px'>{icon} {label}</div>"
                 f"<div style='font-size:22px;font-weight:800;color:{color};font-family:Space Grotesk'>{reel:,.2f} €</div>"
-                f"<div style='font-size:10px;color:{C['muted']};margin:2px 0'>Prévu : {prevu:,.0f}€</div>"
+                f"<div style='font-size:10px;color:{C['muted']};margin:2px 0'>Prévu : {prevu:,.2f}€</div>"
                 f"<div style='background:#1F2937;border-radius:3px;height:5px;width:100%;margin:6px 0 2px'>"
-                f"<div style='background:{bc};width:{pc_w:.0f}%;height:5px;border-radius:3px'></div></div>"
+                f"<div style='background:{bc};width:{pc:.0f}%;height:5px;border-radius:3px'></div></div>"
                 f"<div style='font-size:9px;color:{bc}'>{pct:.0f}% consommé</div></div>")
 
-    def _section_tbl(titre, color, icon, bp_sec, rbc, show_ech=False):
-        cats = list(bp_sec.keys())
+    def _sec_tbl(titre, color, icon, bp_sec, rbc, show_ech=False):
+        cats=list(bp_sec.keys())
         for c in rbc:
             if c not in cats: cats.append(c)
-        h_e = f"<th style='padding:4px 6px;text-align:center;font-size:9px;color:{_C_MUTED}'>ÉCH</th>" if show_ech else ""
-        td_e_empty = "<td></td>" if show_ech else ""
-        tbl = (f"<div style='font-size:10px;font-weight:700;color:{color};text-transform:uppercase;padding:8px 0 4px;letter-spacing:.05em'>{icon} {titre}</div>"
-               f"<table style='width:100%;border-collapse:collapse;font-size:11px'>"
-               f"<thead><tr style='background:#0D1117'>"
-               f"<th style='padding:4px 6px;text-align:left;font-size:9px;color:{_C_MUTED};border-bottom:1px solid {_C_BORDER}'>CATÉGORIE</th>"
-               + h_e +
-               f"<th style='padding:4px 6px;text-align:right;font-size:9px;color:{_C_MUTED};border-bottom:1px solid {_C_BORDER}'>PRÉVU</th>"
-               f"<th style='padding:4px 6px;text-align:right;font-size:9px;color:{_C_MUTED};border-bottom:1px solid {_C_BORDER}'>RÉEL</th>"
-               f"<th style='padding:4px 6px;font-size:9px;color:{_C_MUTED};border-bottom:1px solid {_C_BORDER};min-width:80px'>PROGRESSION</th>"
-               "</tr></thead><tbody>")
+        he=f"<th style='padding:4px 6px;text-align:center;font-size:9px;color:{_C_MUTED}'>ÉCH</th>" if show_ech else ""
+        tde="<td></td>" if show_ech else ""
+        tbl=(f"<div style='font-size:10px;font-weight:700;color:{color};text-transform:uppercase;"
+             f"padding:8px 0 4px;letter-spacing:.05em'>{icon} {titre}</div>"
+             f"<table style='width:100%;border-collapse:collapse;font-size:11px'>"
+             f"<thead><tr style='background:#0D1117'>"
+             f"<th style='padding:4px 6px;text-align:left;font-size:9px;color:{_C_MUTED};border-bottom:1px solid {_C_BORDER}'>CATÉGORIE</th>"
+             +he+
+             f"<th style='padding:4px 6px;text-align:right;font-size:9px;color:{_C_MUTED};border-bottom:1px solid {_C_BORDER}'>PRÉVU</th>"
+             f"<th style='padding:4px 6px;text-align:right;font-size:9px;color:{_C_MUTED};border-bottom:1px solid {_C_BORDER}'>RÉEL</th>"
+             f"<th style='padding:4px 6px;font-size:9px;color:{_C_MUTED};border-bottom:1px solid {_C_BORDER};min-width:80px'>PROGRESSION</th>"
+             "</tr></thead><tbody>")
         if not cats:
-            tbl += f"<tr><td colspan='{'5' if show_ech else '4'}' style='padding:8px 6px;color:{_C_MUTED};font-size:11px;font-style:italic'>Aucune donnée — ajoutez via \"Modifier le budget prévu\"</td></tr>"
-        tp = tr = 0
+            ncols='5' if show_ech else '4'
+            tbl+=f"<tr><td colspan='{ncols}' style='padding:8px 6px;color:{_C_MUTED};font-size:11px;font-style:italic'>Aucune donnée</td></tr>"
+        tp=tr=0
         for cat in cats:
-            v = bp_sec.get(cat, {}); pr = _sf(v.get('prevu', v) if isinstance(v, dict) else v)
-            re = rbc.get(cat, 0); pct = (re / pr * 100) if pr > 0 else (100 if re > 0 else 0)
-            bc2 = "#F87171" if pct > 100 else color; tp += pr; tr += re
-            ech = v.get('echeance', 0) if isinstance(v, dict) else 0
-            td_ech = f"<td style='padding:4px 6px;text-align:center;color:{_C_MUTED};font-size:9px'>{ech or '—'}</td>" if show_ech else ""
-            tbl += (f"<tr style='border-bottom:1px solid {_C_BORDER}'>"
-                    f"<td style='padding:4px 6px;font-weight:500'>{cat}</td>{td_ech}"
-                    f"<td style='padding:4px 6px;text-align:right;color:{_C_MUTED}'>{pr:,.0f}€</td>"
-                    f"<td style='padding:4px 6px;text-align:right;font-weight:600;color:{bc2}'>{re:,.0f}€</td>"
-                    f"<td style='padding:4px 6px'>{_pbar(pct, color)}</td></tr>")
+            v=bp_sec.get(cat,{}); pr=_sf(v.get('prevu',v) if isinstance(v,dict) else v)
+            re=rbc.get(cat,0); pct=(re/pr*100) if pr>0 else (100 if re>0 else 0)
+            bc2="#F87171" if pct>100 else color; tp+=pr; tr+=re
+            ech=v.get('echeance',0) if isinstance(v,dict) else 0
+            td_ech=f"<td style='padding:4px 6px;text-align:center;color:{_C_MUTED};font-size:9px'>{ech or '—'}</td>" if show_ech else ""
+            tbl+=(f"<tr style='border-bottom:1px solid {_C_BORDER}'>"
+                  f"<td style='padding:4px 6px;font-weight:500'>{cat}</td>{td_ech}"
+                  f"<td style='padding:4px 6px;text-align:right;color:{_C_MUTED}'>{pr:,.2f}€</td>"
+                  f"<td style='padding:4px 6px;text-align:right;font-weight:600;color:{bc2}'>{re:,.2f}€</td>"
+                  f"<td style='padding:4px 6px'>{_pb(pct,color)}</td></tr>")
         if cats:
-            tp_pct = (tr / tp * 100) if tp > 0 else 0; tc2 = "#F87171" if tp_pct > 100 else color
-            tbl += (f"<tr style='background:#111827;font-weight:700'><td style='padding:5px 6px'>TOTAL</td>"
-                    + td_e_empty +
-                    f"<td style='padding:5px 6px;text-align:right'>{tp:,.0f}€</td>"
-                    f"<td style='padding:5px 6px;text-align:right;color:{tc2}'>{tr:,.0f}€</td>"
-                    f"<td style='padding:5px 6px'>{_pbar(tp_pct, color)}</td></tr>")
-        tbl += "</tbody></table>"
+            tp_pct=(tr/tp*100) if tp>0 else 0; tc2="#F87171" if tp_pct>100 else color
+            tbl+=(f"<tr style='background:#111827;font-weight:700'><td style='padding:5px 6px'>TOTAL</td>"
+                  +tde+
+                  f"<td style='padding:5px 6px;text-align:right'>{tp:,.2f}€</td>"
+                  f"<td style='padding:5px 6px;text-align:right;color:{tc2}'>{tr:,.2f}€</td>"
+                  f"<td style='padding:5px 6px'>{_pb(tp_pct,color)}</td></tr>")
+        tbl+="</tbody></table>"
         return tbl
 
-    # ── Sélecteur mois (hors expander) ──
-    _sel = st.selectbox("", _mois_opts, format_func=lambda k: _ML.get(k,k), key="bud_mois", label_visibility="collapsed")
-    _md = _bud_data.get("mois",{}).get(_sel, {"transactions":[],"budget_prevu":{}})
-    _txs = _md.get("transactions", []); _bp = _md.get("budget_prevu", {})
+    # ── Sélecteur mois ──
+    _sel=st.selectbox("",_mois_opts,format_func=lambda k:_ML.get(k,k),key="bud_mois",label_visibility="collapsed")
+    _md=_bud_data.get("mois",{}).get(_sel,{"transactions":[],"budget_prevu":{}})
+    _txs=_md.get("transactions",[]); _bp=_md.get("budget_prevu",{})
 
     def _rbc(typ):
-        d = {}
+        d={}
         for t in _txs:
-            if t['type'] == typ: d[t['categorie']] = d.get(t['categorie'],0.0) + t['montant']
+            if t['type']==typ: d[t['categorie']]=d.get(t['categorie'],0.0)+t['montant']
         return d
 
     _rr=_rbc("Revenus"); _rd=_rbc("Dépenses"); _rf=_rbc("Frais Fixes")
@@ -5657,12 +5657,9 @@ with tab_budget:
     epa_p=sum(_sf(v.get('prevu',v) if isinstance(v,dict) else v) for v in _bp.get("epargne",{}).values())
     rest_p=rev_p-dep_p-ff_p-epa_p
 
-    # ════════════════════════════════════════
-    # GRAND EXPANDER — VUE MENSUELLE
-    # ════════════════════════════════════════
+    # ════════════ EXPANDER SUIVI MENSUEL ════════════
     with st.expander(f"📊 {_ML.get(_sel,'').upper()} — Suivi mensuel du budget", expanded=True):
 
-        # ── Titre ──
         st.markdown(
             f"<div style='background:linear-gradient(90deg,{_BUD_BG},#0D1F18);"
             f"border-left:3px solid {_BUD_COLOR};padding:8px 14px;border-radius:6px;margin-bottom:10px'>"
@@ -5670,90 +5667,67 @@ with tab_budget:
             f"<span style='font-size:11px;color:{_C_MUTED};margin-left:10px'>Suivi mensuel · {_sel}</span></div>",
             unsafe_allow_html=True)
 
-        # ── 5 KPIs avec barres de progression ──
-        _k5 = st.columns(5)
+        # 5 KPIs avec barres
+        _k5=st.columns(5)
         for _col,(_lbl,_pv2,_rv2,_clr2,_ic2) in zip(_k5,[
-            ("REVENUS",      rev_p, rev_r,  "#10B981","💶"),
-            ("DÉPENSES",     dep_p, dep_r,  "#F87171","🛒"),
-            ("FRAIS FIXES",  ff_p,  ff_r,   "#FBBF24","🏠"),
-            ("CRÉDITS",      0,     crd_r,  "#F59E0B","💳"),
-            ("ÉPARGNE",      epa_p, epa_r,  "#818CF8","💰"),
+            ("REVENUS",    rev_p, rev_r, "#10B981","💶"),
+            ("DÉPENSES",   dep_p, dep_r, "#F87171","🛒"),
+            ("FRAIS FIXES",ff_p,  ff_r,  "#FBBF24","🏠"),
+            ("CRÉDITS",    0,     crd_r, "#F59E0B","💳"),
+            ("ÉPARGNE",    epa_p, epa_r, "#818CF8","💰"),
         ]):
-            with _col: st.markdown(_kpi_budget(_lbl, _rv2, _pv2, _clr2, _ic2), unsafe_allow_html=True)
+            with _col: st.markdown(_kpi_bud(_lbl,_rv2,_pv2,_clr2,_ic2),unsafe_allow_html=True)
 
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:8px'></div>",unsafe_allow_html=True)
 
-        # ── 3 Graphiques ──
-        _g1, _g2, _g3 = st.columns([1.3, 1, 1])
+        # 3 graphiques
+        _g1,_g2,_g3=st.columns([1.3,1,1])
         with _g1:
-            _fig_b = go.Figure()
-            _xb = ["Revenus","Dépenses","Frais Fixes","Épargne & Inv."]
-            _pvb=[rev_p,dep_p,ff_p,epa_p]; _rvb=[rev_r,dep_r,ff_r,epa_r]
-            _fig_b.add_trace(go.Bar(name='Prévu', x=_xb, y=_pvb, marker_color='rgba(99,102,241,0.5)',
-                text=[f"{v:,.0f}" for v in _pvb], textposition='outside', textfont=dict(size=8)))
-            _fig_b.add_trace(go.Bar(name='Réel', x=_xb, y=_rvb, marker_color='rgba(16,185,129,0.85)',
-                text=[f"{v:,.0f}" for v in _rvb], textposition='outside', textfont=dict(size=8)))
-            _fig_b.update_layout(**base_layout(185))
-            _fig_b.update_layout(barmode='group', showlegend=True,
-                title=dict(text="Résumé Entrées & Sorties", font=dict(size=11,color=_C_MUTED), x=0.5),
-                legend=dict(orientation='h', y=-0.32, font=dict(size=10), bgcolor='rgba(0,0,0,0)'),
+            _fb2=go.Figure()
+            _xb=["Revenus","Dépenses","Frais Fixes","Épargne"]; _pvb=[rev_p,dep_p,ff_p,epa_p]; _rvb=[rev_r,dep_r,ff_r,epa_r]
+            _fb2.add_trace(go.Bar(name='Prévu',x=_xb,y=_pvb,marker_color='rgba(99,102,241,0.5)',
+                text=[f"{v:,.0f}" for v in _pvb],textposition='outside',textfont=dict(size=8)))
+            _fb2.add_trace(go.Bar(name='Réel',x=_xb,y=_rvb,marker_color='rgba(16,185,129,0.85)',
+                text=[f"{v:,.0f}" for v in _rvb],textposition='outside',textfont=dict(size=8)))
+            _fb2.update_layout(**base_layout(185)); _fb2.update_layout(barmode='group',showlegend=True,
+                title=dict(text="Résumé Entrées & Sorties",font=dict(size=11,color=_C_MUTED),x=0.5),
+                legend=dict(orientation='h',y=-0.32,font=dict(size=10),bgcolor='rgba(0,0,0,0)'),
                 margin=dict(l=10,r=10,t=35,b=55))
-            _fig_b.update_yaxes(ticksuffix='€', tickfont=dict(size=8))
-            _fig_b.update_xaxes(tickfont=dict(size=8))
-            st.plotly_chart(_fig_b, use_container_width=True, config={'displayModeBar':False})
-
+            _fb2.update_yaxes(ticksuffix='€',tickfont=dict(size=8)); _fb2.update_xaxes(tickfont=dict(size=8))
+            st.plotly_chart(_fb2,use_container_width=True,config={'displayModeBar':False})
         with _g2:
-            _rp=[(c,v) for c,v in _rr.items() if v>0]
-            if _rp:
+            _rp2=[(c,v) for c,v in _rr.items() if v>0]
+            if _rp2:
                 _clrs_r=['#10B981','#34D399','#6EE7B7','#A7F3D0','#D1FAE5']
-                _fig_r=go.Figure(go.Pie(labels=[x[0] for x in _rp],values=[x[1] for x in _rp],
-                    hole=0.6,textinfo='percent',textfont=dict(size=9,color='white'),
-                    marker=dict(colors=_clrs_r[:len(_rp)],line=dict(color=_C_BG,width=2))))
-                _fig_r.add_annotation(text=f"<b>{rev_r:,.0f}€</b>",x=0.5,y=0.5,
-                    font=dict(size=11,color=_C_TEXT),showarrow=False)
-                _fig_r.update_layout(**base_layout(185,False))
-                _fig_r.update_layout(showlegend=True,
+                _fr2=go.Figure(go.Pie(labels=[x[0] for x in _rp2],values=[x[1] for x in _rp2],hole=0.6,
+                    textinfo='percent',textfont=dict(size=9,color='white'),
+                    marker=dict(colors=_clrs_r[:len(_rp2)],line=dict(color=_C_BG,width=2))))
+                _fr2.add_annotation(text=f"<b>{rev_r:,.0f}€</b>",x=0.5,y=0.5,font=dict(size=11,color=_C_TEXT),showarrow=False)
+                _fr2.update_layout(**base_layout(185,False)); _fr2.update_layout(showlegend=True,
                     legend=dict(font=dict(size=9),x=0.68,y=0.5,bgcolor='rgba(0,0,0,0)'),
                     title=dict(text="Répartition des Revenus",font=dict(size=11,color=_C_MUTED),x=0.3),
                     margin=dict(l=0,r=90,t=35,b=10))
-                st.plotly_chart(_fig_r,use_container_width=True,config={'displayModeBar':False})
-            else:
-                st.markdown(f"<div style='color:{_C_MUTED};text-align:center;padding:60px 0;font-size:11px'>Aucun revenu</div>",unsafe_allow_html=True)
-
+                st.plotly_chart(_fr2,use_container_width=True,config={'displayModeBar':False})
         with _g3:
-            _bp3=[(l,v,c) for l,v,c in [("Dépenses",dep_r,"#F87171"),("Frais Fixes",ff_r,"#FBBF24"),
+            _bp4=[(l,v,c) for l,v,c in [("Dépenses",dep_r,"#F87171"),("Frais Fixes",ff_r,"#FBBF24"),
                 ("Épargne",epa_r,"#818CF8"),("Crédits",crd_r,"#F59E0B")] if v>0]
-            if _bp3:
-                _fig_bp=go.Figure(go.Pie(labels=[x[0] for x in _bp3],values=[x[1] for x in _bp3],
-                    hole=0.6,textinfo='percent+label',textfont=dict(size=9,color='white'),
-                    marker=dict(colors=[x[2] for x in _bp3],line=dict(color=_C_BG,width=2))))
-                _fig_bp.add_annotation(text=f"<b>{sum(v for _,v,_ in _bp3):,.0f}€</b>",x=0.5,y=0.5,
-                    font=dict(size=11,color=_C_TEXT),showarrow=False)
-                _fig_bp.update_layout(**base_layout(185,False))
-                _fig_bp.update_layout(showlegend=False,
+            if _bp4:
+                _fbp=go.Figure(go.Pie(labels=[x[0] for x in _bp4],values=[x[1] for x in _bp4],hole=0.6,
+                    textinfo='percent+label',textfont=dict(size=9,color='white'),
+                    marker=dict(colors=[x[2] for x in _bp4],line=dict(color=_C_BG,width=2))))
+                _fbp.add_annotation(text=f"<b>{sum(v for _,v,_ in _bp4):,.0f}€</b>",x=0.5,y=0.5,font=dict(size=11,color=_C_TEXT),showarrow=False)
+                _fbp.update_layout(**base_layout(185,False)); _fbp.update_layout(showlegend=False,
                     title=dict(text="Répartition du Budget",font=dict(size=11,color=_C_MUTED),x=0.5),
                     margin=dict(l=10,r=10,t=35,b=10))
-                st.plotly_chart(_fig_bp,use_container_width=True,config={'displayModeBar':False})
+                st.plotly_chart(_fbp,use_container_width=True,config={'displayModeBar':False})
 
-        # ── 3 colonnes tables ──
-        _cl, _cm, _cr = st.columns([0.9, 1.2, 1.2])
-
+        # 3 colonnes tables
+        _cl,_cm,_cr=st.columns([0.9,1.2,1.2])
         with _cl:
-            # RÉSUMÉ DES REVENUS (en premier)
-            st.markdown(_section_tbl("RÉSUMÉ DES REVENUS","#10B981","💶",_bp.get("revenus",{}),_rr), unsafe_allow_html=True)
-            st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-
-            # Montant restant à dépenser
-            _rdep=(dep_p+ff_p)-(dep_r+ff_r); _rdc="#10B981" if _rdep>=0 else "#F87171"
-            st.markdown(
-                f"<div style='background:{_BUD_BG};border:1px solid {_BUD_COLOR}33;border-radius:6px;padding:10px 12px;margin-bottom:10px'>"
-                f"<div style='font-size:9px;color:{_C_MUTED};text-transform:uppercase'>Montant restant à dépenser</div>"
-                f"<div style='font-size:22px;font-weight:800;color:{_rdc};font-family:Space Grotesk'>{_rdep:,.2f} €</div>"
-                f"<div style='font-size:10px;color:{_C_MUTED}'>{'✅ Budget respecté' if _rdep>=0 else f'⚠️ Dépassé de {abs(_rdep):,.0f}€'}</div></div>",
-                unsafe_allow_html=True)
-
-            # RÉSUMÉ ENTRÉES & SORTIES (en dessous)
-            _tg=(f"<div style='font-size:10px;font-weight:700;color:{_C_MUTED};text-transform:uppercase;padding:8px 0 4px'>📊 RÉSUMÉ ENTRÉES & SORTIES</div>"
+            st.markdown(_sec_tbl("RÉSUMÉ DES REVENUS","#10B981","💶",_bp.get("revenus",{}),_rr),unsafe_allow_html=True)
+            # Résumé Entrées & Sorties
+            _rc3="#10B981" if rest_r>=0 else "#F87171"
+            _tg=(f"<div style='font-size:10px;font-weight:700;color:{_C_MUTED};text-transform:uppercase;padding:12px 0 4px'>📊 RÉSUMÉ ENTRÉES & SORTIES</div>"
                  f"<table style='width:100%;border-collapse:collapse;font-size:11px'>"
                  f"<thead><tr style='background:#0D1117'>"
                  f"<th style='padding:4px 6px;font-size:9px;color:{_C_MUTED};border-bottom:1px solid {_C_BORDER}'>CATÉGORIE</th>"
@@ -5768,145 +5742,187 @@ with tab_budget:
             ]:
                 _tg+=(f"<tr style='border-bottom:1px solid {_C_BORDER}'>"
                       f"<td style='padding:4px 6px;color:{_clr3};font-size:11px'>{_lbl2}</td>"
-                      f"<td style='padding:4px 6px;text-align:right;color:{_C_MUTED}'>{_pv3:,.0f}€</td>"
-                      f"<td style='padding:4px 6px;text-align:right;color:{_clr3}'>{_rv3:,.0f}€</td></tr>")
-            _rc3="#10B981" if rest_r>=0 else "#F87171"
+                      f"<td style='padding:4px 6px;text-align:right;color:{_C_MUTED}'>{_pv3:,.2f}€</td>"
+                      f"<td style='padding:4px 6px;text-align:right;color:{_clr3}'>{_rv3:,.2f}€</td></tr>")
             _tg+=(f"<tr style='background:#0D1117;font-weight:700'>"
                   f"<td style='padding:5px 6px;color:{_rc3}'>TOTAL RESTANT</td>"
-                  f"<td style='padding:5px 6px;text-align:right;color:{_C_MUTED}'>{rest_p:,.0f}€</td>"
-                  f"<td style='padding:5px 6px;text-align:right;color:{_rc3}'>{rest_r:,.0f}€</td></tr></tbody></table>")
-            st.markdown(_tg, unsafe_allow_html=True)
-
+                  f"<td style='padding:5px 6px;text-align:right;color:{_C_MUTED}'>{rest_p:,.2f}€</td>"
+                  f"<td style='padding:5px 6px;text-align:right;color:{_rc3}'>{rest_r:,.2f}€</td></tr></tbody></table>")
+            st.markdown(_tg,unsafe_allow_html=True)
+            # Montant restant (après le tableau)
+            _rdep=(dep_p+ff_p)-(dep_r+ff_r); _rdc="#10B981" if _rdep>=0 else "#F87171"
+            st.markdown(
+                f"<div style='background:{_BUD_BG};border:1px solid {_BUD_COLOR}33;border-radius:6px;padding:10px 12px;margin:10px 0'>"
+                f"<div style='font-size:9px;color:{_C_MUTED};text-transform:uppercase'>Montant restant à dépenser</div>"
+                f"<div style='font-size:22px;font-weight:800;color:{_rdc};font-family:Space Grotesk'>{_rdep:,.2f} €</div>"
+                f"<div style='font-size:10px;color:{_C_MUTED}'>{'✅ Budget respecté' if _rdep>=0 else f'⚠️ Dépassé de {abs(_rdep):,.2f}€'}</div></div>",
+                unsafe_allow_html=True)
         with _cm:
-            st.markdown(_section_tbl("RÉSUMÉ DES DÉPENSES","#F87171","🛒",_bp.get("depenses",{}),_rd), unsafe_allow_html=True)
-            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-            st.markdown(_section_tbl("RÉSUMÉ ÉPARGNE & INVESTISSEMENTS","#818CF8","💰",_bp.get("epargne",{}),_re), unsafe_allow_html=True)
-
+            st.markdown(_sec_tbl("RÉSUMÉ DES DÉPENSES","#F87171","🛒",_bp.get("depenses",{}),_rd),unsafe_allow_html=True)
+            st.markdown("<div style='height:12px'></div>",unsafe_allow_html=True)
+            st.markdown(_sec_tbl("RÉSUMÉ ÉPARGNE & INVESTISSEMENTS","#818CF8","💰",_bp.get("epargne",{}),_re),unsafe_allow_html=True)
         with _cr:
-            st.markdown(_section_tbl("RÉSUMÉ DES FRAIS FIXES","#FBBF24","🏠",_bp.get("frais_fixes",{}),_rf,show_ech=True), unsafe_allow_html=True)
-            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-            st.markdown(_section_tbl("RÉSUMÉ CRÉDITS / DETTES","#F59E0B","💳",_bp.get("credits",{}),_rc), unsafe_allow_html=True)
+            st.markdown(_sec_tbl("RÉSUMÉ DES FRAIS FIXES","#FBBF24","🏠",_bp.get("frais_fixes",{}),_rf,show_ech=True),unsafe_allow_html=True)
+            st.markdown("<div style='height:12px'></div>",unsafe_allow_html=True)
+            st.markdown(_sec_tbl("RÉSUMÉ CRÉDITS / DETTES","#F59E0B","💳",_bp.get("credits",{}),_rc),unsafe_allow_html=True)
 
-        # ── Formulaires ──
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        _fa2, _fb2 = st.columns(2)
-        with _fa2:
-            with st.form("form_bud_tx", clear_on_submit=True):
-                st.markdown(f"<div style='font-size:11px;font-weight:700;color:{_BUD_COLOR};margin-bottom:8px'>➕ Ajouter une transaction</div>", unsafe_allow_html=True)
-                _fd=st.date_input("Date", value=_now_p.date(), key="fb_date")
-                _ft=st.selectbox("Type", _TYPES, key="fb_type")
-                _fc=st.text_input("Catégorie", key="fb_cat")
+        # Transactions dans le même expander (toggle)
+        st.markdown("<hr style='border-color:#1F2937;margin:16px 0'>",unsafe_allow_html=True)
+        if st.toggle("📋 Transactions du mois",key="tog_tx"):
+            _tf2=st.multiselect("",_TYPES,default=_TYPES,key="bud_filter",label_visibility="collapsed")
+            _txsf=sorted([t for t in _txs if t['type'] in _tf2],key=lambda x:x['date'],reverse=True)
+            if _txsf:
+                _tt=(f"<table style='width:100%;border-collapse:collapse;font-size:11px'>"
+                     f"<thead><tr style='background:#0D1117'>")
+                for _h in ["Date","Type","Catégorie","Montant","Description"]:
+                    _tt+=f"<th style='padding:4px 10px;font-size:9px;color:{_C_MUTED};border-bottom:1px solid {_C_BORDER}'>{_h}</th>"
+                _tt+="</tr></thead><tbody>"
+                for _t in _txsf:
+                    _tc3=_TC.get(_t['type'],"#fff"); _sc="#10B981" if _t['type']=='Revenus' else "#F87171"
+                    _sg3="+" if _t['type']=='Revenus' else "-"
+                    _tt+=(f"<tr style='border-bottom:1px solid {_C_BORDER}'>"
+                        f"<td style='padding:4px 10px;color:{_C_MUTED}'>{_t['date']}</td>"
+                        f"<td style='padding:4px 10px'><span style='font-size:9px;background:{_tc3}22;color:{_tc3};padding:1px 6px;border-radius:3px'>{_t['type']}</span></td>"
+                        f"<td style='padding:4px 10px;font-weight:500'>{_t['categorie']}</td>"
+                        f"<td style='padding:4px 10px;text-align:right;font-weight:600;color:{_sc}'>{_sg3}{abs(_t['montant']):.2f}€</td>"
+                        f"<td style='padding:4px 10px;color:{_C_MUTED};font-size:10px'>{_t.get('description','')}</td></tr>")
+                _tt+="</tbody></table>"
+                st.markdown(_tt,unsafe_allow_html=True)
+            else: st.info("Aucune transaction pour ce mois.")
+
+    # ════════════ AJOUTER TRANSACTION ════════════
+    with st.expander("➕ Ajouter une transaction", expanded=False):
+        with st.form("form_bud_tx", clear_on_submit=True):
+            _cA,_cB=st.columns(2)
+            with _cA:
+                _fd=st.date_input("Date",value=_now_p.date(),key="fb_date")
+                _ft=st.selectbox("Type",_TYPES,key="fb_type")
+                _fc=st.text_input("Catégorie",key="fb_cat")
+            with _cB:
                 _sugg_d={"Revenus":["Salaire","Remboursement","Prime"],
                     "Dépenses":["Course Alimentaire","Cantine Travail","Transport","Extra","Restaurant","Coiffeur","Osteo","Sport"],
                     "Frais Fixes":["Loyer","Électricité","Internet","Téléphone mobile","Assurance habitation","Assurance Voiture","Frais Bancaire"],
                     "Épargne & Investissements":["Trade Republic","PEA Bourso","Crypto Binance","Interactive Broker","PEL Crédit Mutuelle"],
                     "Crédits / Dettes":["Crédit","Remboursement"]}
-                _sg2=_sugg_d.get(_ft,[])
-                if _sg2: st.markdown(f"<div style='font-size:10px;color:{_C_MUTED};margin:-4px 0 6px'>{' · '.join(_sg2[:5])}</div>", unsafe_allow_html=True)
-                _fa3=st.number_input("Montant (€)", min_value=0.0, step=0.01, format="%.2f", key="fb_amt")
-                _fd3=st.text_input("Description", key="fb_desc")
-                _fs2=st.form_submit_button("💾 Ajouter", use_container_width=True)
-            if _fs2:
-                if _fc.strip() and _fa3>0:
-                    _mk2=_fd.strftime("%Y-%m")
-                    if _mk2 not in _bud_data["mois"]:
-                        _bud_data["mois"][_mk2]={"nom":_ML.get(_mk2,_mk2),"transactions":[],
-                            "budget_prevu":{"revenus":{},"depenses":{},"frais_fixes":{},"epargne":{},"credits":{}}}
-                    _bud_data["mois"][_mk2]["transactions"].append({"date":str(_fd),"type":_ft,
-                        "categorie":_fc.strip(),"montant":round(_fa3,2),"description":_fd3.strip()})
-                    _bud_data["mois"][_mk2]["transactions"].sort(key=lambda x:x["date"])
-                    if _save_budget(_bud_data, f"Tx {_ft} {_fc} {_fa3:.0f}€"):
-                        st.success(f"✅ {_fc} — {_fa3:.2f}€"); _load_budget.clear()
-                    else: st.error("❌ Erreur GitHub")
-                else: st.warning("Catégorie et montant requis.")
+                _sg2=_sugg_d.get("Dépenses",[])
+                st.markdown(f"<div style='font-size:10px;color:{_C_MUTED};margin-top:28px'>Suggestions :</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='font-size:10px;color:{_C_MUTED}'>{' · '.join(_sg2[:5])}</div>", unsafe_allow_html=True)
+                _fa3=st.number_input("Montant (€)",min_value=0.0,step=0.01,format="%.2f",key="fb_amt")
+                _fd3=st.text_input("Description",key="fb_desc")
+            _fs2=st.form_submit_button("💾 Ajouter la transaction",use_container_width=True)
+        if _fs2:
+            if _fc.strip() and _fa3>0:
+                _mk2=_fd.strftime("%Y-%m")
+                if _mk2 not in _bud_data["mois"]:
+                    _bud_data["mois"][_mk2]={"nom":_ML.get(_mk2,_mk2),"transactions":[],
+                        "budget_prevu":{"revenus":{},"depenses":{},"frais_fixes":{},"epargne":{},"credits":{}}}
+                _bud_data["mois"][_mk2]["transactions"].append({"date":str(_fd),"type":_ft,
+                    "categorie":_fc.strip(),"montant":round(_fa3,2),"description":_fd3.strip()})
+                _bud_data["mois"][_mk2]["transactions"].sort(key=lambda x:x["date"])
+                if _save_budget(_bud_data,f"Tx {_ft} {_fc} {_fa3:.0f}€"):
+                    st.success(f"✅ {_fc} — {_fa3:.2f}€"); _load_budget.clear()
+                else: st.error("❌ Erreur GitHub")
+            else: st.warning("Catégorie et montant requis.")
 
-        with _fb2:
-            with st.form("form_bud_prev", clear_on_submit=False):
-                st.markdown(f"<div style='font-size:11px;font-weight:700;color:#F59E0B;margin-bottom:8px'>✏️ Modifier le budget prévu</div>", unsafe_allow_html=True)
-                st.markdown(f"<div style='font-size:10px;color:{_C_MUTED};margin-bottom:8px'>Définir/ajuster pour {_ML.get(_sel,'')}</div>", unsafe_allow_html=True)
+        # Supprimer une transaction
+        if _txs:
+            st.markdown(f"<div style='font-size:11px;color:{_C_MUTED};margin:12px 0 6px;font-weight:600'>🗑️ Supprimer une transaction</div>", unsafe_allow_html=True)
+            _tx_labels=[f"{t['date']} · {t['type']} · {t['categorie']} · {t['montant']:.2f}€" for t in _txs]
+            _tx_del=st.selectbox("",_tx_labels,key="tx_del_sel",label_visibility="collapsed")
+            if st.button("🗑️ Supprimer cette transaction",key="btn_del_tx"):
+                _idx_del=_tx_labels.index(_tx_del)
+                _bud_data["mois"][_sel]["transactions"].pop(_idx_del)
+                if _save_budget(_bud_data,f"Suppression tx {_tx_del[:40]}"):
+                    st.success("✅ Transaction supprimée"); _load_budget.clear()
+                else: st.error("❌ Erreur GitHub")
+
+    # ════════════ MODIFIER BUDGET PRÉVU ════════════
+    with st.expander("✏️ Modifier le budget prévu", expanded=False):
+        _cP1,_cP2=st.columns(2)
+        with _cP1:
+            st.markdown(f"<div style='font-size:11px;color:{_C_MUTED};margin-bottom:8px'>Définir/ajuster pour {_ML.get(_sel,'')}</div>",unsafe_allow_html=True)
+            with st.form("form_bud_prev",clear_on_submit=False):
                 _fp_t=st.selectbox("Section",["depenses","frais_fixes","epargne","revenus","credits"],
                     format_func=lambda x:{"depenses":"Dépenses","frais_fixes":"Frais Fixes",
-                        "epargne":"Épargne & Investissements","revenus":"Revenus","credits":"Crédits"}[x], key="fp_type")
-                _fp_c=st.text_input("Catégorie", key="fp_cat")
-                _fp_a=st.number_input("Montant prévu (€)", min_value=0.0, step=1.0, format="%.0f", key="fp_amt")
-                _fp_s=st.form_submit_button("✏️ Enregistrer", use_container_width=True)
+                        "epargne":"Épargne & Investissements","revenus":"Revenus","credits":"Crédits"}[x],key="fp_type")
+                _fp_c=st.text_input("Catégorie",key="fp_cat")
+                _fp_a=st.number_input("Montant prévu (€)",min_value=0.0,step=1.0,format="%.2f",key="fp_amt")
+                _fp_s=st.form_submit_button("✏️ Enregistrer",use_container_width=True)
             if _fp_s:
                 if _fp_c.strip():
                     if _sel not in _bud_data["mois"]:
                         _bud_data["mois"][_sel]={"nom":_ML.get(_sel,""),"transactions":[],
                             "budget_prevu":{"revenus":{},"depenses":{},"frais_fixes":{},"epargne":{},"credits":{}}}
                     _bud_data["mois"][_sel].setdefault("budget_prevu",{}).setdefault(_fp_t,{})
-                    _cc=_fp_c.strip()
+                    _cc2=_fp_c.strip()
                     if _fp_t=="frais_fixes":
-                        _oe=_bud_data["mois"][_sel]["budget_prevu"][_fp_t].get(_cc,{})
-                        _bud_data["mois"][_sel]["budget_prevu"][_fp_t][_cc]={"prevu":round(_fp_a,2),"reel":0,
+                        _oe=_bud_data["mois"][_sel]["budget_prevu"][_fp_t].get(_cc2,{})
+                        _bud_data["mois"][_sel]["budget_prevu"][_fp_t][_cc2]={"prevu":round(_fp_a,2),"reel":0,
                             "echeance":_oe.get("echeance",0) if isinstance(_oe,dict) else 0}
                     else:
-                        _bud_data["mois"][_sel]["budget_prevu"][_fp_t][_cc]={"prevu":round(_fp_a,2),"reel":0}
-                    if _save_budget(_bud_data, f"Budget {_sel} {_fp_t} {_cc}={_fp_a:.0f}€"):
-                        st.success(f"✅ {_cc} → {_fp_a:.0f}€"); _load_budget.clear()
+                        _bud_data["mois"][_sel]["budget_prevu"][_fp_t][_cc2]={"prevu":round(_fp_a,2),"reel":0}
+                    if _save_budget(_bud_data,f"Budget {_sel} {_fp_t} {_cc2}={_fp_a:.0f}€"):
+                        st.success(f"✅ {_cc2} → {_fp_a:.2f}€"); _load_budget.clear()
                     else: st.error("❌ Erreur GitHub")
                 else: st.warning("Catégorie requise.")
 
-    # ════════════════════════════════════════
-    # TRANSACTIONS (pleine largeur, toggle)
-    # ════════════════════════════════════════
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    if st.toggle("📋 Transactions du mois", key="tog_tx"):
-        _tf=st.multiselect("", _TYPES, default=_TYPES, key="bud_filter", label_visibility="collapsed")
-        _txsf=sorted([t for t in _txs if t['type'] in _tf], key=lambda x:x['date'], reverse=True)
-        if _txsf:
-            _tt=(f"<table style='width:100%;border-collapse:collapse;font-size:11px'>"
-                 f"<thead><tr style='background:#0D1117'>")
-            for _h in ["Date","Type","Catégorie","Montant","Description"]:
-                _tt+=f"<th style='padding:4px 10px;font-size:9px;color:{_C_MUTED};border-bottom:1px solid {_C_BORDER}'>{_h}</th>"
-            _tt+="</tr></thead><tbody>"
-            for _t in _txsf:
-                _tc3=_TC.get(_t['type'],"#fff"); _sc="#10B981" if _t['type']=='Revenus' else "#F87171"
-                _sg3="+" if _t['type']=='Revenus' else "-"
-                _tt+=(f"<tr style='border-bottom:1px solid {_C_BORDER}'>"
-                    f"<td style='padding:4px 10px;color:{_C_MUTED}'>{_t['date']}</td>"
-                    f"<td style='padding:4px 10px'><span style='font-size:9px;background:{_tc3}22;color:{_tc3};padding:1px 6px;border-radius:3px'>{_t['type']}</span></td>"
-                    f"<td style='padding:4px 10px;font-weight:500'>{_t['categorie']}</td>"
-                    f"<td style='padding:4px 10px;text-align:right;font-weight:600;color:{_sc}'>{_sg3}{abs(_t['montant']):.2f}€</td>"
-                    f"<td style='padding:4px 10px;color:{_C_MUTED};font-size:10px'>{_t.get('description','')}</td></tr>")
-            _tt+="</tbody></table>"
-            st.markdown(_tt, unsafe_allow_html=True)
-        else: st.info("Aucune transaction pour ce mois.")
+        with _cP2:
+            # Supprimer un budget prévu
+            _all_bp_cats=[]
+            for _sec_n,_sec_d in _bp.items():
+                for _cat_n in _sec_d:
+                    _all_bp_cats.append(f"{_sec_n} · {_cat_n}")
+            if _all_bp_cats:
+                st.markdown(f"<div style='font-size:11px;color:{_C_MUTED};margin-bottom:6px;font-weight:600'>🗑️ Supprimer une catégorie de budget</div>",unsafe_allow_html=True)
+                _bp_del=st.selectbox("",_all_bp_cats,key="bp_del_sel",label_visibility="collapsed")
+                if st.button("🗑️ Supprimer cette catégorie",key="btn_del_bp"):
+                    _bp_sec_n,_bp_cat_n=_bp_del.split(" · ",1)
+                    if _bp_cat_n in _bud_data["mois"][_sel]["budget_prevu"].get(_bp_sec_n,{}):
+                        del _bud_data["mois"][_sel]["budget_prevu"][_bp_sec_n][_bp_cat_n]
+                        if _save_budget(_bud_data,f"Suppression budget {_sel} {_bp_sec_n} {_bp_cat_n}"):
+                            st.success(f"✅ {_bp_cat_n} supprimé"); _load_budget.clear()
+                        else: st.error("❌ Erreur GitHub")
 
-    # ════════════════════════════════════════
-    # RÉSUMÉ ANNUEL (pleine largeur, toggle)
-    # ════════════════════════════════════════
-    if st.toggle("📅 Résumé annuel 2026", key="tog_ann"):
+    # ════════════ EXPANDER RÉSUMÉ ANNUEL ════════════
+    with st.expander("📅 RÉSUMÉ ANNUEL 2026", expanded=False):
+        st.markdown(
+            f"<div style='background:linear-gradient(90deg,#0A1218,#0D1F18);"
+            f"border-left:3px solid #58A6FF;padding:8px 14px;border-radius:6px;margin-bottom:10px'>"
+            f"<b style='font-size:16px;color:#58A6FF'>RÉSUMÉ ANNUEL 2026</b>"
+            f"<span style='font-size:11px;color:{_C_MUTED};margin-left:10px'>Suivi de l'année complète</span></div>",
+            unsafe_allow_html=True)
         _ta=(f"<table style='width:100%;border-collapse:collapse;font-size:12px'>"
              f"<thead><tr style='background:#0D1117'>")
-        for _h,_hc in [("Mois",_C_MUTED),("Revenus","#10B981"),("Dépenses+FF","#F87171"),("Épargne","#818CF8"),("Restant",_C_MUTED)]:
+        for _h,_hc in [("Mois",_C_MUTED),("Revenus","#10B981"),("Dépenses","#F87171"),
+                       ("Frais Fixes","#FBBF24"),("Épargne","#818CF8"),("Crédits","#F59E0B"),("Restant",_C_MUTED)]:
             _ta+=f"<th style='padding:6px 10px;text-align:right;font-size:10px;color:{_hc};border-bottom:1px solid {_C_BORDER}'>{_h}</th>"
         _ta+="</tr></thead><tbody>"
-        _tot_a=[0.0]*4
+        _tot_a=[0.0]*6
         for _mk3 in sorted(_bud_data.get("mois",{}).keys()):
             _mt3=_bud_data["mois"][_mk3].get("transactions",[])
             _mr3=sum(t['montant'] for t in _mt3 if t['type']=='Revenus')
-            _md3=sum(t['montant'] for t in _mt3 if t['type'] in ['Dépenses','Frais Fixes'])
+            _md3=sum(t['montant'] for t in _mt3 if t['type']=='Dépenses')
+            _mf3=sum(t['montant'] for t in _mt3 if t['type']=='Frais Fixes')
             _me3=sum(t['montant'] for t in _mt3 if t['type']=='Épargne & Investissements')
-            _mrest3=_mr3-_md3-_me3
-            for i,v in enumerate([_mr3,_md3,_me3,_mrest3]): _tot_a[i]+=v
+            _mc3=sum(t['montant'] for t in _mt3 if t['type']=='Crédits / Dettes')
+            _mrest3=_mr3-_md3-_mf3-_me3-_mc3
+            for i,v in enumerate([_mr3,_md3,_mf3,_me3,_mc3,_mrest3]): _tot_a[i]+=v
             _rc4="#10B981" if _mrest3>=0 else "#F87171"
             _ta+=(f"<tr style='border-bottom:1px solid {_C_BORDER}'>"
                 f"<td style='padding:5px 10px;font-weight:600'>{_ML.get(_mk3,_mk3)}</td>"
-                f"<td style='padding:5px 10px;text-align:right;color:#10B981'>{_mr3:,.0f}€</td>"
-                f"<td style='padding:5px 10px;text-align:right;color:#F87171'>{_md3:,.0f}€</td>"
-                f"<td style='padding:5px 10px;text-align:right;color:#818CF8'>{_me3:,.0f}€</td>"
-                f"<td style='padding:5px 10px;text-align:right;font-weight:700;color:{_rc4}'>{_mrest3:,.0f}€</td></tr>")
-        _tr_c3="#10B981" if _tot_a[3]>=0 else "#F87171"
+                f"<td style='padding:5px 10px;text-align:right;color:#10B981'>{_mr3:,.2f}€</td>"
+                f"<td style='padding:5px 10px;text-align:right;color:#F87171'>{_md3:,.2f}€</td>"
+                f"<td style='padding:5px 10px;text-align:right;color:#FBBF24'>{_mf3:,.2f}€</td>"
+                f"<td style='padding:5px 10px;text-align:right;color:#818CF8'>{_me3:,.2f}€</td>"
+                f"<td style='padding:5px 10px;text-align:right;color:#F59E0B'>{_mc3:,.2f}€</td>"
+                f"<td style='padding:5px 10px;text-align:right;font-weight:700;color:{_rc4}'>{_mrest3:,.2f}€</td></tr>")
+        _tr_c3="#10B981" if _tot_a[5]>=0 else "#F87171"
         _ta+=(f"<tr style='background:#0D1117;font-weight:700;border-top:2px solid {_C_BORDER}'>"
             f"<td style='padding:6px 10px'>TOTAL YTD</td>"
-            f"<td style='padding:6px 10px;text-align:right;color:#10B981'>{_tot_a[0]:,.0f}€</td>"
-            f"<td style='padding:6px 10px;text-align:right;color:#F87171'>{_tot_a[1]:,.0f}€</td>"
-            f"<td style='padding:6px 10px;text-align:right;color:#818CF8'>{_tot_a[2]:,.0f}€</td>"
-            f"<td style='padding:6px 10px;text-align:right;color:{_tr_c3}'>{_tot_a[3]:,.0f}€</td>"
-            "</tr></tbody></table>")
-        st.markdown(_ta, unsafe_allow_html=True)
+            +f"".join(f"<td style='padding:6px 10px;text-align:right;color:{c}'>{v:,.2f}€</td>"
+                      for v,c in zip(_tot_a,["#10B981","#F87171","#FBBF24","#818CF8","#F59E0B",_tr_c3]))
+            +"</tr></tbody></table>")
+        st.markdown(_ta,unsafe_allow_html=True)
 
 with tab9:
     sec("🚧 Chantier — Roadmap & dette technique", "🚧", "#F59E0B", "#1C1400")
@@ -6071,21 +6087,23 @@ seront reconstruits depuis le JSON — le Snapshot figera le point de fin de moi
         "#A78BFA", "Après point 7")
 
     _chantier_card("11 — Onglet Budget & Dépenses mensuelles", "💰",
-        """Intégration du suivi budget mensuel/annuel dans SamInvest (décidé le 01/07/2026).<br><br>
-<b>Source</b> : fichier Excel "Suivi du Budget Mensuel & Annuel 2026" (FocusDaily template).<br>
-<b>Structure</b> : 12 mois × 5 blocs (Revenus / Dépenses / Frais Fixes / Épargne & Investissements / Crédits)
-avec Prévu vs Réel + liste de transactions brutes. Résumé annuel par mois.<br><br>
-<b>Données 2026 à migrer</b> : Jan→Jun déjà remplis dans le Sheet (Revenus ~3 200€/mois,
-Frais Fixes ~920€/mois, Épargne &amp; Investissements 737-1 743€/mois). Total restant YTD : 3 845€.<br><br>
-<b>Synergie avec SamInvest</b> : la section "Épargne & Investissements" du budget (DCA Bourse/Crypto/PEE/PER)
-sera cohérente avec historique_dca.json — à terme, plus de double saisie.<br><br>
-<b>Plan</b> :<br>
-— budget_2026.json stocké sur GitHub (même pattern que historique_dca.json)<br>
-— Onglet "💰 Budget" avec vue mensuelle (mois courant) + résumé annuel<br>
-— Formulaire de saisie rapide de transactions (type, catégorie, montant, date)<br>
-— Premier jet en session dédiée pour valider l'ergonomie avant d'aller plus loin<br><br>
-<i>Priorité : après Chantier 8 terminé (ou en parallèle si Sheet encore défaillant).</i>""",
-        "#34D399", "Prochain")
+        """<b>🔄 EN COURS (01/07/2026) — Premier jet complet déployé.</b><br><br>
+<b>✅ Fait :</b><br>
+— budget_2026.json sur GitHub (246 transactions Jan-Jun, budgets prévisionnels par catégorie)<br>
+— Grand expander mensuel : 5 KPIs avec barres de progression (Revenus/Dépenses/FF/Crédits/Épargne)<br>
+— 3 graphiques : bar Prévu vs Réel, pie Répartition Revenus, pie Répartition Budget<br>
+— 3 colonnes PRÉVU/RÉEL/PROGRESSION : Revenus+Résumé global+Montant restant | Dépenses+Épargne | FF+Crédits<br>
+— Toggle Transactions du mois dans l'expander mensuel (pleine largeur)<br>
+— Expander Ajouter une transaction + suppression de transaction<br>
+— Expander Modifier le budget prévu + suppression de catégorie de budget<br>
+— Grand expander Résumé annuel 2026 (7 colonnes, 2 décimales, totaux YTD)<br>
+— Affichage 2 décimales partout<br><br>
+<b>⏳ À faire :</b><br>
+— Reste du mois précédent (carry-forward N-1)<br>
+— Graphique annuel (bar chart mensuel Revenus/Dépenses/Épargne)<br>
+— Alertes si catégorie dépassée<br>
+— Lien auto Épargne <> historique_dca.json (plus de double saisie)<br>""",
+        "#34D399", "En cours")
 
     # ── Au fil de l'eau ──
     st.markdown(f"<div style='font-size:11px;color:{C['muted']};text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin:18px 0 10px 2px'>🔵 Au fil de l'eau</div>", unsafe_allow_html=True)
