@@ -2535,6 +2535,11 @@
             "prevu": 4.34,
             "reel": 0,
             "echeance": 0
+          },
+          "Assurance Voiture": {
+            "prevu": 75.0,
+            "reel": 0,
+            "echeance": 0
           }
         },
         "epargne": {},
