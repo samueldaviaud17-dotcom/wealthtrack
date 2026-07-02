@@ -2189,6 +2189,10 @@
           "Cadres Displate": {
             "prevu": 77.0,
             "reel": 76.98
+          },
+          "essai": {
+            "prevu": 10000.0,
+            "reel": 0
           }
         },
         "frais_fixes": {
