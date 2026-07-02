@@ -2491,6 +2491,13 @@
           "categorie": "Extra",
           "montant": 15.0,
           "description": "Participation Kdo Isabelle Alstom"
+        },
+        {
+          "date": "2026-07-02",
+          "type": "Dépenses",
+          "categorie": "Extra",
+          "montant": 10.0,
+          "description": "Pétanque"
         }
       ],
       "budget_prevu": {
