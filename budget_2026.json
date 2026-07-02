@@ -2479,18 +2479,18 @@
           "description": ""
         },
         {
+          "date": "2026-07-01",
+          "type": "Épargne & Investissements",
+          "categorie": "PEL Crédit Mutuelle",
+          "montant": 45.0,
+          "description": ""
+        },
+        {
           "date": "2026-07-02",
           "type": "Dépenses",
           "categorie": "Extra",
           "montant": 15.0,
           "description": "Participation Kdo Isabelle Alstom"
-        },
-        {
-          "date": "2026-07-02",
-          "type": "Épargne & Investissements",
-          "categorie": "PEL Crédit Mutuelle",
-          "montant": 70.0,
-          "description": ""
         }
       ],
       "budget_prevu": {
