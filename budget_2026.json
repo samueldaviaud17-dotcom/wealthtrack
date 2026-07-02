@@ -2479,6 +2479,13 @@
           "description": ""
         },
         {
+          "date": "2026-07-01",
+          "type": "Revenus",
+          "categorie": "Dividendes et Intérêts",
+          "montant": 17.0,
+          "description": ""
+        },
+        {
           "date": "2026-07-02",
           "type": "Dépenses",
           "categorie": "Extra",
