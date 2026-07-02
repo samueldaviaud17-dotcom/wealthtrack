@@ -2472,6 +2472,13 @@
           "description": ""
         },
         {
+          "date": "2026-07-01",
+          "type": "Revenus",
+          "categorie": "Salaire",
+          "montant": 3803.58,
+          "description": ""
+        },
+        {
           "date": "2026-07-02",
           "type": "Dépenses",
           "categorie": "Extra",
